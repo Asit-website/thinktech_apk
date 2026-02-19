@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "Vetansutra",
+    "slug": "vetansutra",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#ffffff",
+      "resizeMode": "contain"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.vetansutra.mobile"
+    },
+    "android": {
+      "package": "com.vetansutra.mobile",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.INTERNET"
+      ]
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow Godown Management to access your microphone for audio entry."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Godown Management to access your camera for slip images."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Godown Management to access your photos for slip images."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "437f91d3-2f45-4329-9f92-44827854b3dc"
+      }
+    }
+  }
+}
