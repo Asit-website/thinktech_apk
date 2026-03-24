@@ -1,0 +1,5 @@
+
+export async function listOrderProducts() {
+  const resp = await api.get('/sales/order-products');
+  return resp.data;
+}

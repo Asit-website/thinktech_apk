@@ -1,4 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { Alert, AppState } from 'react-native';
+import * as Updates from 'expo-updates';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,6 +12,7 @@ import AttendanceReportScreen from './src/screens/AttendanceReportScreen';
 import LeaveScreen from './src/screens/LeaveScreen';
 import ApplyLeaveScreen from './src/screens/ApplyLeaveScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
+import ClaimEncashmentScreen from './src/screens/ClaimEncashmentScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
@@ -19,6 +22,7 @@ import SalaryScreen from './src/screens/SalaryScreen';
 import SalaryReportScreen from './src/screens/SalaryReportScreen';
 import ReportsScreen from './src/screens/ReportsScreen';
 import OrderFormScreen from './src/screens/OrderFormScreen';
+import ExpenseScreen from './src/screens/ExpenseScreen';
 import AssignedJobsScreen from './src/screens/AssignedJobsScreen';
 import AssignedJobDetailScreen from './src/screens/AssignedJobDetailScreen';
 import TargetsScreen from './src/screens/TargetsScreen';
@@ -28,11 +32,20 @@ import BankDetailsScreen from './src/screens/BankDetailsScreen';
 import AccountSettingsScreen from './src/screens/AccountSettingsScreen';
 import GeneralInfoScreen from './src/screens/GeneralInfoScreen';
 import HelpSupportScreen from './src/screens/HelpSupportScreen';
+import TodoListScreen from './src/screens/TodoListScreen';
+import ActivityScreen from './src/screens/ActivityScreen';
+import MeetingScreen from './src/screens/MeetingScreen';
+import TicketScreen from './src/screens/TicketScreen';
+import AIChatScreen from './src/screens/AIChatScreen';
 import ToastHost from './src/components/ToastHost';
 import AndroidNotification from './src/components/AndroidNotification';
 import { setNotificationRef } from './src/utils/notify';
 import { PermissionsProvider } from './src/contexts/PermissionsContext';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
+import { defineBackgroundTask } from './src/services/locationService';
+
+// Register background location task (must be called at module level, before app renders)
+defineBackgroundTask();
 
 const Stack = createNativeStackNavigator();
 
@@ -61,6 +74,53 @@ export default function App() {
     return () => {
       mounted = false;
     };
+  }, []);
+
+  useEffect(() => {
+    async function onFetchUpdateAsync() {
+      try {
+        const update = await Updates.checkForUpdateAsync();
+
+        if (update.isAvailable) {
+          Alert.alert(
+            'Update Available',
+            'A new version of the app is available. Please update now to get the latest features.',
+            [
+              {
+                text: 'Update Now',
+                onPress: async () => {
+                  try {
+                    await Updates.fetchUpdateAsync();
+                    await Updates.reloadAsync();
+                  } catch (error) {
+                    Alert.alert('Error', 'Failed to fetch the update. Please try again later.');
+                  }
+                },
+              },
+            ],
+            { cancelable: false }
+          );
+        }
+      } catch (error) {
+        // You can also log error to an error reporting service here
+        console.log(`Error fetching latest Expo update: ${error}`);
+      }
+    }
+
+    if (!__DEV__) {
+      onFetchUpdateAsync();
+
+      // Check for updates when the app returns from background to foreground
+      const subscription = AppState.addEventListener('change', nextAppState => {
+        if (nextAppState === 'active') {
+          onFetchUpdateAsync();
+        }
+      });
+
+      return () => {
+        subscription.remove();
+      };
+    }
   }, []);
 
   useEffect(() => {
@@ -99,6 +159,7 @@ export default function App() {
           <Stack.Screen name="Leave" component={LeaveScreen} options={{ headerShown: false }} />
           <Stack.Screen name="ApplyLeave" component={ApplyLeaveScreen} options={{ headerShown: false }} />
           <Stack.Screen name="History" component={HistoryScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="ClaimEncashment" component={ClaimEncashmentScreen} options={{ headerShown: false }} />
           <Stack.Screen name="Calendar" component={CalendarScreen} options={{ headerShown: false }} />
           <Stack.Screen name="Profile" component={ProfileScreen} options={{ headerShown: false }} />
           <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
@@ -117,6 +178,12 @@ export default function App() {
           <Stack.Screen name="AssignedJobDetail" component={AssignedJobDetailScreen} options={{ headerShown: false }} />
           <Stack.Screen name="Targets" component={TargetsScreen} options={{ headerShown: false }} />
           <Stack.Screen name="OrderForm" component={OrderFormScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Expense" component={ExpenseScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="TodoList" component={TodoListScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Activity" component={ActivityScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Meeting" component={MeetingScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Ticket" component={TicketScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="AIChat" component={AIChatScreen} options={{ headerShown: false }} />
         </Stack.Navigator>
       </NavigationContainer>
     </PermissionsProvider>

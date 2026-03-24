@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Alert, ActivityIndicator, Modal } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import BottomNav from '../components/BottomNav';
-import { listAllLeaveRequests, listMyLeaveRequests, updateLeaveStatus } from '../config/api';
+import { listAllLeaveRequests, listMyLeaveRequests, updateLeaveStatus, listMyLeaveEncashments } from '../config/api';
 import { notifyError, notifySuccess } from '../utils/notify';
 
 export default function LeaveScreen({ navigation }) {
   const [activeTab, setActiveTab] = useState('pending');
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState([]);
+  const [encashmentClaims, setEncashmentClaims] = useState([]);
   const [role, setRole] = useState('staff');
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifLeaves, setNotifLeaves] = useState([]); // APPROVED + REJECTED
@@ -29,14 +30,23 @@ export default function LeaveScreen({ navigation }) {
   const loadLeaves = async () => {
     setLoading(true);
     try {
-      const res = role === 'staff' ? await listMyLeaveRequests({ status: tabStatus }) : await listAllLeaveRequests({ status: tabStatus });
-      if (res?.success) {
-        setItems(Array.isArray(res.leaves) ? res.leaves : []);
+      if (activeTab === 'encashment') {
+        const res = await listMyLeaveEncashments();
+        if (res?.success) {
+          setEncashmentClaims(Array.isArray(res.claims) ? res.claims : []);
+        } else {
+          notifyError(res?.message || 'Unable to load encashment claims.');
+        }
       } else {
-        notifyError(res?.message || 'Unable to load leave requests.');
+        const res = role === 'staff' ? await listMyLeaveRequests({ status: tabStatus }) : await listAllLeaveRequests({ status: tabStatus });
+        if (res?.success) {
+          setItems(Array.isArray(res.leaves) ? res.leaves : []);
+        } else {
+          notifyError(res?.message || 'Unable to load leave requests.');
+        }
       }
     } catch (e) {
-      notifyError('Unable to load leave requests.');
+      notifyError('Unable to load data.');
     } finally {
       setLoading(false);
     }
@@ -48,7 +58,7 @@ export default function LeaveScreen({ navigation }) {
 
   useEffect(() => {
     loadLeaves();
-  }, [role, tabStatus]);
+  }, [role, tabStatus, activeTab]);
 
   // Notifications polling and badge count (approved + rejected total)
   useEffect(() => {
@@ -69,7 +79,7 @@ export default function LeaveScreen({ navigation }) {
         setNotifLeaves(items);
         // Show total approved + rejected on the badge
         setUnseenCount(items.length);
-      } catch (e) {}
+      } catch (e) { }
     };
     compute();
     const intv = setInterval(compute, 60000);
@@ -86,7 +96,7 @@ export default function LeaveScreen({ navigation }) {
       const toStore = latest ? new Date(latest).toISOString() : new Date().toISOString();
       await AsyncStorage.setItem('notif:lastSeenApprovedAt', toStore);
       // Keep badge as total count; do not clear
-    } catch {}
+    } catch { }
   };
 
   const onMarkRead = () => {
@@ -126,7 +136,7 @@ export default function LeaveScreen({ navigation }) {
     return d.toLocaleDateString(undefined, { weekday: 'long' });
   };
 
-  
+
   const onReview = async (id, nextStatus) => {
     try {
       const res = await updateLeaveStatus(id, { status: nextStatus });
@@ -166,6 +176,14 @@ export default function LeaveScreen({ navigation }) {
         >
           <Text style={[styles.tabText, activeTab === 'approved' && styles.tabTextActive]}>Approved</Text>
         </TouchableOpacity>
+        {role === 'staff' && (
+          <TouchableOpacity
+            onPress={() => setActiveTab('encashment')}
+            style={[styles.tab, activeTab === 'encashment' ? styles.tabActive : styles.tabInactive]}
+          >
+            <Text style={[styles.tabText, activeTab === 'encashment' && styles.tabTextActive]}>Encashment</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
@@ -181,7 +199,13 @@ export default function LeaveScreen({ navigation }) {
           </View>
         ) : null}
 
-        {items.map((it) => (
+        {!loading && activeTab === 'encashment' && encashmentClaims.length === 0 ? (
+          <View style={{ paddingVertical: 24 }}>
+            <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', textAlign: 'center' }}>No encashment claims</Text>
+          </View>
+        ) : null}
+
+        {activeTab !== 'encashment' ? items.map((it) => (
           <View key={String(it.id)} style={styles.card}>
             <View style={styles.cardTop}>
               <View>
@@ -227,7 +251,7 @@ export default function LeaveScreen({ navigation }) {
               </View>
             ) : null}
 
-            
+
             {tabStatus === 'PENDING' && (role === 'admin' || role === 'superadmin') ? (
               <View style={styles.actionRow}>
                 <TouchableOpacity style={styles.rejectBtn} activeOpacity={0.9} onPress={() => onReview(it.id, 'REJECTED')}>
@@ -239,11 +263,58 @@ export default function LeaveScreen({ navigation }) {
               </View>
             ) : null}
           </View>
+        )) : encashmentClaims.map((it) => (
+          <View key={String(it.id)} style={styles.card}>
+            <View style={styles.cardTop}>
+              <View>
+                <Text style={styles.cardDate}>{formatDate(it.createdAt).split(' ')[0]}</Text>
+                <Text style={styles.cardDay}>{it.monthKey}</Text>
+              </View>
+              <View style={[styles.statusBadge, { backgroundColor: it.status === 'APPROVED' ? '#DEF7EC' : it.status === 'REJECTED' ? '#FDE8E8' : '#FEF3C7' }]}>
+                <Text style={[styles.statusText, { color: it.status === 'APPROVED' ? '#03543F' : it.status === 'REJECTED' ? '#9B1C1C' : '#92400E' }]}>
+                  {it.status}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.divider} />
+            <View style={styles.cardRow}>
+              <View style={styles.cardCol}>
+                <Text style={styles.muted}>Days</Text>
+                <Text style={styles.value}>{it.days} Days</Text>
+              </View>
+              <View style={styles.cardCol}>
+                <Text style={styles.muted}>Category</Text>
+                <Text style={styles.value}>{it.categoryKey ? String(it.categoryKey).toUpperCase() : '-'}</Text>
+              </View>
+            </View>
+            <View style={styles.cardRow}>
+              <View style={styles.cardCol}>
+                <Text style={styles.muted}>Estimated Amount</Text>
+                <Text style={styles.value}>₹ {it.amount || '-'}</Text>
+              </View>
+              <View style={styles.cardCol}>
+                <Text style={styles.muted}>Payroll Month</Text>
+                <Text style={styles.value}>{it.monthKey || '-'}</Text>
+              </View>
+            </View>
+            {it.reviewNote ? (
+              <View style={[styles.cardRow, { marginTop: 6 }]}>
+                <View style={styles.cardCol}>
+                  <Text style={styles.muted}>Admin Note</Text>
+                  <Text style={styles.value}>{it.reviewNote}</Text>
+                </View>
+              </View>
+            ) : null}
+          </View>
         ))}
         <View style={{ height: 140 }} />
       </ScrollView>
 
-      <TouchableOpacity style={styles.fab} activeOpacity={0.9} onPress={() => navigation.navigate('ApplyLeave')}>
+      <TouchableOpacity
+        style={styles.fab}
+        activeOpacity={0.9}
+        onPress={() => navigation.navigate(activeTab === 'encashment' ? 'ClaimEncashment' : 'ApplyLeave')}
+      >
         <Text style={styles.fabPlus}>+</Text>
       </TouchableOpacity>
 
@@ -355,5 +426,16 @@ const styles = StyleSheet.create({
   rejectBtnText: { color: '#fff', fontFamily: 'Inter_600SemiBold' },
   approveBtn: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, backgroundColor: '#125EC9' },
   approveBtnText: { color: '#fff', fontFamily: 'Inter_600SemiBold' },
+
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  statusText: {
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+    textTransform: 'uppercase',
+  },
 
 });

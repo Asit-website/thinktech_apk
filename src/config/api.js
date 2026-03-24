@@ -6,6 +6,8 @@ const API_BASE_URL = __DEV__
   ? 'http://localhost:4000'  // Local development
   : process.env.API_URL || 'https://backend.vetansutra.com';  // Production from EAS env or fallback
 
+export { API_BASE_URL };
+
 const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000, // 30 second timeout
@@ -161,6 +163,9 @@ export async function punchInWithPhoto(photoUri, coords) {
     if (typeof coords.accuracy === 'number') {
       form.append('accuracyMeters', String(Math.round(coords.accuracy)));
     }
+    if (coords.address) {
+      form.append('address', String(coords.address));
+    }
     console.log('Location data added to form');
   }
 
@@ -225,6 +230,9 @@ export async function punchOutWithPhoto(photoUri, coords) {
     form.append('lng', String(coords.lng));
     if (typeof coords.accuracy === 'number') {
       form.append('accuracyMeters', String(Math.round(coords.accuracy)));
+    }
+    if (coords.address) {
+      form.append('address', String(coords.address));
     }
     console.log('Location data added to form');
   }
@@ -317,6 +325,16 @@ export async function getMyLeaveCategories(dateIso) {
 export async function getMyWeeklyOffDates(start, end) {
   const qs = `?start=${encodeURIComponent(String(start))}&end=${encodeURIComponent(String(end))}`;
   const resp = await api.get(`/leave/weekly-off/my${qs}`);
+  return resp.data;
+}
+
+export async function claimLeaveEncashment({ categoryKey, days, monthKey }) {
+  const resp = await api.post('/leave/encash/claim', { categoryKey, days, monthKey });
+  return resp.data;
+}
+
+export async function listMyLeaveEncashments() {
+  const resp = await api.get('/leave/encash/claims/me'); // I should probably add this route to backend if I want staff to see their claims
   return resp.data;
 }
 
@@ -490,7 +508,23 @@ export async function sendClientOtp(phone) {
   return resp.data;
 }
 
-export async function submitVisitForm({ visitDate, salesPerson, visitType, clientName, phone, clientType, location, attachments = [], clientOtp, clientSignature, checkInLat, checkInLng, assignedJobId } = {}) {
+export async function submitVisitForm({
+  visitDate,
+  salesPerson,
+  visitType,
+  clientName,
+  phone,
+  clientType,
+  location,
+  attachments = [],
+  clientOtp,
+  clientSignature,
+  checkInLat,
+  checkInLng,
+  checkInAltitude,
+  checkInAddress,
+  assignedJobId
+} = {}) {
   console.log('submitVisitForm called with:', {
     visitDate,
     salesPerson,
@@ -516,6 +550,8 @@ export async function submitVisitForm({ visitDate, salesPerson, visitType, clien
   if (clientOtp) form.append('clientOtp', clientOtp);
   if (typeof checkInLat === 'number') form.append('checkInLat', String(checkInLat));
   if (typeof checkInLng === 'number') form.append('checkInLng', String(checkInLng));
+  if (typeof checkInAltitude === 'number') form.append('checkInAltitude', String(checkInAltitude));
+  if (checkInAddress) form.append('checkInAddress', String(checkInAddress));
   if (assignedJobId) form.append('assignedJobId', String(assignedJobId));
 
   // Handle signature - exact same pattern as order proof
@@ -617,8 +653,26 @@ export async function getCurrentIncentive(period = 'daily') {
   return resp.data;
 }
 
+export async function listOrderProducts() {
+  const resp = await api.get('/sales/order-products');
+  return resp.data;
+}
+
 // Orders
-export async function submitOrder({ orderDate, paymentMethod, remarks, items = [], assignedJobId, clientId, proof } = {}) {
+export async function submitOrder({
+  orderDate,
+  paymentMethod,
+  remarks,
+  items = [],
+  assignedJobId,
+  clientId,
+  phone,
+  proof,
+  checkInLat,
+  checkInLng,
+  checkInAltitude,
+  checkInAddress,
+} = {}) {
   console.log('submitOrder called with:', {
     orderDate,
     paymentMethod,
@@ -626,6 +680,7 @@ export async function submitOrder({ orderDate, paymentMethod, remarks, items = [
     itemsCount: items.length,
     assignedJobId,
     clientId,
+    phone,
     hasProof: !!proof
   });
 
@@ -636,6 +691,11 @@ export async function submitOrder({ orderDate, paymentMethod, remarks, items = [
   if (Array.isArray(items)) form.append('items', JSON.stringify(items));
   if (assignedJobId) form.append('assignedJobId', String(assignedJobId));
   if (clientId) form.append('clientId', String(clientId));
+  if (phone) form.append('phone', phone);
+  if (typeof checkInLat === 'number') form.append('checkInLat', String(checkInLat));
+  if (typeof checkInLng === 'number') form.append('checkInLng', String(checkInLng));
+  if (typeof checkInAltitude === 'number') form.append('checkInAltitude', String(checkInAltitude));
+  if (checkInAddress) form.append('checkInAddress', String(checkInAddress));
 
   if (proof && proof.uri) {
     const name = proof.name || 'proof.jpg';
@@ -702,3 +762,113 @@ export async function submitOrder({ orderDate, paymentMethod, remarks, items = [
   }
 }
 
+// Expenses (mobile: staff submit expenses)
+export async function submitExpense({ expenseType, expenseDate, amount, billNumber, description, attachment } = {}) {
+  const form = new FormData();
+  if (expenseType) form.append('expenseType', expenseType);
+  if (expenseDate) form.append('expenseDate', typeof expenseDate === 'string' ? expenseDate : new Date(expenseDate).toISOString());
+  if (amount !== undefined) form.append('amount', String(Number(amount) || 0));
+  if (billNumber) form.append('billNumber', billNumber);
+  if (description) form.append('description', description);
+
+  if (attachment && attachment.uri) {
+    const name = attachment.name || (attachment.uri.split('/').pop() || 'attachment');
+    const type = attachment.type || 'application/octet-stream';
+    if (Platform.OS === 'web') {
+      const r = await fetch(attachment.uri);
+      const blob = await r.blob();
+      const webFile = new File([blob], name, { type: blob.type || type });
+      form.append('attachment', webFile);
+    } else {
+      form.append('attachment', { uri: attachment.uri, name, type });
+    }
+  }
+
+  const resp = await api.post('/me/expenses', form);
+  return resp.data;
+}
+
+// Activities
+export async function listMyActivities() {
+  const resp = await api.get('/activities/me');
+  return resp.data;
+}
+
+export async function createActivity(data) {
+  const resp = await api.post('/activities', data);
+  return resp.data;
+}
+
+export async function updateActivity(id, data) {
+  const resp = await api.patch(`/activities/${id}`, data);
+  return resp.data;
+}
+
+export async function updateActivityStatus(id, status, remarks) {
+  // Normalize status to uppercase for backend consistency
+  const normalizedStatus = String(status).toUpperCase().replace(/\s+/g, '_');
+  const resp = await api.patch(`/activities/${id}/status`, { status: normalizedStatus, remarks });
+  return resp.data;
+}
+
+export async function transferActivity(id, targetUserId) {
+  const resp = await api.patch(`/activities/${id}/transfer`, { targetUserId });
+  return resp.data;
+}
+
+// Tickets
+export async function listMyTickets() {
+  const resp = await api.get('/tickets/my');
+  return resp.data;
+}
+
+export async function createTicket(data) {
+  const resp = await api.post('/tickets', data);
+  return resp.data;
+}
+
+export async function updateTicket(id, data) {
+  const resp = await api.patch(`/tickets/${id}`, data);
+  return resp.data;
+}
+
+export async function updateTicketStatus(id, { status, remarks }) {
+  const resp = await api.patch(`/tickets/${id}/status`, { status, remarks });
+  return resp.data;
+}
+
+export async function listStaffForAllocation() {
+  const resp = await api.get('/tickets/staff');
+  return resp.data;
+}
+
+// Meetings
+export async function listMyMeetings() {
+  const resp = await api.get('/meetings/me');
+  return resp.data;
+}
+
+export async function createMeeting(data) {
+  const resp = await api.post('/meetings', data);
+  return resp.data;
+}
+
+export async function updateMeeting(id, data) {
+  const resp = await api.put(`/meetings/${encodeURIComponent(String(id))}`, data);
+  return resp.data;
+}
+
+export async function updateMeetingStatus(id, status, remarks) {
+  const resp = await api.patch(`/meetings/${id}/status`, { status, remarks });
+  return resp.data;
+}
+
+export async function listAllStaff() {
+  const resp = await api.get('/me/staff-list');
+  return resp.data;
+}
+
+export async function askAI(messages) {
+  const resp = await api.post('/ai/ask', { messages });
+  return resp.data;
+}

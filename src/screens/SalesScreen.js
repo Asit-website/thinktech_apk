@@ -164,6 +164,7 @@ export default function SalesScreen({ navigation }) {
           <QuickAction title="Order Form" icon={require('../assets/visit2.png')} onPress={() => navigation.navigate('OrderForm')} />
           <QuickAction title="Assigned Job" icon={require('../assets/visit3.png')} onPress={() => navigation.navigate('AssignedJobs')} />
           <QuickAction title="Targets" icon={require('../assets/visit4.png')} onPress={() => navigation.navigate('Targets')} />
+          <QuickAction title="Expense" icon={require('../assets/currency-rupee.png')} onPress={() => navigation.navigate('Expense')} />
         </View>
 
         {/* spacer removed; bottom padding on ScrollView handles safe space */}

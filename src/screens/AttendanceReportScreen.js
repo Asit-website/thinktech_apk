@@ -525,10 +525,10 @@ export default function AttendanceReportScreen({ navigation }) {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.downloadButton} activeOpacity={0.85} onPress={handleDownloadReport}>
+        {/* <TouchableOpacity style={styles.downloadButton} activeOpacity={0.85} onPress={handleDownloadReport}>
           <Image source={require('../assets/vix.png')} style={styles.downloadIcon} />
           <Text style={styles.downloadButtonText}>Download</Text>
-        </TouchableOpacity>
+        </TouchableOpacity> */}
       </ScrollView>
 
       {/* <BottomNav navigation={navigation} activeKey="Attendance" /> */}
@@ -1247,6 +1247,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#E6EEFF',
+    width: '100%',
   },
   weeklyProgressTitle: {
     fontFamily: 'Inter_600SemiBold',

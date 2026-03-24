@@ -14,6 +14,12 @@ export default function HomeScreen({ navigation }) {
 
         <View style={styles.menu}>
           <MenuItem
+            title="AI Assistant"
+            LeftIcon={<Image source={require('../assets/uki.png')} style={{ width: 22, height: 22, tintColor: '#125EC9' }} />}
+            onPress={() => navigation.navigate('AIChat')}
+          />
+
+          <MenuItem
             title="Attendance"
             LeftIcon={<Image source={require('../assets/journal-text.png')} style={{ width: 18, height: 18 }} />}
             onPress={() => navigation.navigate('Attendance')}
@@ -38,22 +44,32 @@ export default function HomeScreen({ navigation }) {
             LeftIcon={<Image source={require('../assets/currency-rupee.png')} style={{ width: 18, height: 18 }} />}
             onPress={() => navigation.navigate('Salary')}
           />
+
+          <MenuItem
+            title="My Task"
+            LeftIcon={<Image source={require('../assets/journal-check.png')} style={{ width: 18, height: 18 }} />}
+            onPress={() => navigation.navigate('TodoList')}
+          />
         </View>
       </View>
     </SafeAreaView>
   );
 }
 
-function MenuItem({ title, LeftIcon, onPress }) {
+function MenuItem({ title, LeftIcon, onPress, isAI }) {
   return (
-    <TouchableOpacity style={styles.item} activeOpacity={0.8} onPress={onPress}>
+    <TouchableOpacity 
+      style={[styles.item, isAI && styles.aiItem]} 
+      activeOpacity={0.8} 
+      onPress={onPress}
+    >
       <View style={styles.itemLeft}>
         <View style={styles.iconWrap}>{LeftIcon}</View>
-        <Text style={styles.itemText}>{title}</Text>
+        <Text style={[styles.itemText, isAI && styles.aiItemText]}>{title}</Text>
       </View>
       <Image
         source={require('../assets/Path (Stroke).png')}
-        style={{ width: 12, height: 12 }}
+        style={[{ width: 12, height: 12 }, isAI && { tintColor: '#fff' }]}
         resizeMode="contain"
       />
     </TouchableOpacity>
@@ -110,5 +126,13 @@ const styles = StyleSheet.create({
     color: '#125EC9',
     fontSize: 18,
     fontFamily: 'Inter_500Medium',
+  },
+  aiItem: {
+    backgroundColor: '#125EC9',
+    borderColor: '#125EC9',
+  },
+  aiItemText: {
+    color: '#ffffff',
+    fontFamily: 'Inter_600SemiBold',
   },
 });

@@ -2,8 +2,9 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Image, TextInput, Platform, Alert, Modal, Pressable, ActivityIndicator } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { getAssignedJobDetail, listMyAssignedJobs, submitOrder } from '../config/api';
+import { getAssignedJobDetail, listMyAssignedJobs, submitOrder, listOrderProducts } from '../config/api';
 import { notifySuccess, notifyError } from '../utils/notify';
+import { formatAddress } from '../services/locationService';
 
 export default function OrderFormScreen() {
   const navigation = useNavigation();
@@ -19,6 +20,10 @@ export default function OrderFormScreen() {
   const [products, setProducts] = useState([]);
   const [showProductModal, setShowProductModal] = useState(false);
   const [newProd, setNewProd] = useState({ name: '', size: '', qty: 1, price: '' });
+  const [masterProducts, setMasterProducts] = useState([]);
+  const [loadingMaster, setLoadingMaster] = useState(false);
+  const [productSearch, setProductSearch] = useState('');
+  const [showMasterModal, setShowMasterModal] = useState(false);
 
   // Client selection / source
   const assignedJobId = route.params?.assignedJobId ? Number(route.params.assignedJobId) : null;
@@ -36,7 +41,7 @@ export default function OrderFormScreen() {
   }, [products]);
 
   const fmtDateLine = (d) => {
-    const wk = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+    const wk = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
     const dd = String(d.getDate()).padStart(2, '0');
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const yyyy = d.getFullYear();
@@ -48,24 +53,74 @@ export default function OrderFormScreen() {
     if (val) setOrderDate(val);
   };
 
+  const loadMasterProducts = async () => {
+    try {
+      setLoadingMaster(true);
+      console.log('[DEBUG] Calling listOrderProducts API...');
+      const res = await listOrderProducts();
+      console.log('[DEBUG] listOrderProducts response:', res);
+      if (res?.success) {
+        setMasterProducts(res.products || []);
+      } else {
+        console.warn('[DEBUG] listOrderProducts failed:', res?.message);
+      }
+    } catch (err) {
+      console.error('[DEBUG] loadMasterProducts error:', err);
+    }
+    finally { setLoadingMaster(false); }
+  };
+
   const addProduct = () => {
     setNewProd({ name: '', size: '', qty: 1, price: '' });
+    setProductSearch('');
     setShowProductModal(true);
+    if (masterProducts.length === 0) loadMasterProducts();
   };
 
   const submitNewProduct = () => {
     const nextId = (products[products.length - 1]?.id || 0) + 1;
-    const nextLetter = String.fromCharCode(65 + products.length); // A,B,C...
-    const name = newProd.name?.trim() || `Product ${nextLetter}`;
-    const size = newProd.size?.trim() || 'M';
+    const name = newProd.name?.trim();
+    if (!name) {
+      notifyError('Product name is required');
+      return;
+    }
+    const size = newProd.size?.trim() || '';
     const qty = String(Math.max(0, Number(newProd.qty) || 0));
     const price = String(Math.max(0, Number(newProd.price) || 0));
     setProducts((prev) => [...prev, { id: nextId, name, size, qty, price }]);
     setShowProductModal(false);
   };
 
+  const onSelectMasterProduct = (p) => {
+    const nextId = (products[products.length - 1]?.id || 0) + 1;
+    setProducts((prev) => [
+      ...prev,
+      {
+        id: nextId,
+        name: p.name || '',
+        size: p.size || '',
+        qty: String(p.defaultQty || 1),
+        price: String(p.defaultPrice || 0),
+      }
+    ]);
+    setProductSearch('');
+    notifySuccess(`${p.name} added`);
+  };
+
+  const filteredMasterProducts = useMemo(() => {
+    if (!productSearch.trim()) return masterProducts;
+    const s = productSearch.toLowerCase();
+    return masterProducts.filter((p) =>
+      p.name?.toLowerCase().includes(s) || p.size?.toLowerCase().includes(s)
+    );
+  }, [masterProducts, productSearch]);
+
   const updateProduct = (id, key, value) => {
     setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, [key]: value } : p)));
+  };
+
+  const removeProduct = (id) => {
+    setProducts((prev) => prev.filter((p) => p.id !== id));
   };
 
   const onPickImageFromCamera = useCallback(async () => {
@@ -128,7 +183,7 @@ export default function OrderFormScreen() {
   const onUploadProof = useCallback(() => {
     if (Platform.OS === 'web') {
       // Trigger hidden file input to pick a file on web
-      try { webFileInputRef.current && webFileInputRef.current.click(); } catch (e) {}
+      try { webFileInputRef.current && webFileInputRef.current.click(); } catch (e) { }
       return;
     }
     if (Platform.OS === 'ios') {
@@ -160,12 +215,13 @@ export default function OrderFormScreen() {
     const uri = URL.createObjectURL(f);
     setProof({ uri, name: f.name, type: f.type || 'application/octet-stream' });
     // reset input to allow choosing the same file again
-    try { e.target.value = null; } catch (_) {}
+    try { e.target.value = null; } catch (_) { }
   };
 
   // Prefill if coming from an assigned job
   React.useEffect(() => {
     let active = true;
+    loadMasterProducts(); // Auto-load products on mount
     if (!assignedJobId) return () => { active = false; };
     (async () => {
       try {
@@ -177,7 +233,7 @@ export default function OrderFormScreen() {
           if (c.phone) setPhone(c.phone);
           if (c.location) setRemarks((r) => r);
         }
-      } catch (_) {}
+      } catch (_) { }
     })();
     return () => { active = false; };
   }, [assignedJobId]);
@@ -197,7 +253,7 @@ export default function OrderFormScreen() {
         location: r.client?.location || '',
       })).filter((c) => c.id);
       setClientOptions(opts);
-    } catch (_) {}
+    } catch (_) { }
     finally { setLoadingClients(false); }
   };
 
@@ -209,14 +265,77 @@ export default function OrderFormScreen() {
   };
 
   const onSubmit = async () => {
+    if (!clientName?.trim()) {
+      notifyError('Client name is required');
+      return;
+    }
     if (!proof || !proof.uri) {
       notifyError('Upload proof is required');
       return;
     }
     try {
       setSubmitting(true);
-      const items = products.map((p) => ({ name: p.name, size: p.size, qty: Number(p.qty)||0, price: Number(p.price)||0 }));
-      const payload = { orderDate, paymentMethod, remarks, items, proof };
+      let geo = { lat: undefined, lng: undefined, altitude: undefined, address: undefined };
+      try {
+        const Location = require('expo-location');
+        const perm = await Location.requestForegroundPermissionsAsync();
+        if (perm?.status === 'granted') {
+          const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          const coords = current?.coords || {};
+          geo = {
+            lat: typeof coords.latitude === 'number' ? coords.latitude : undefined,
+            lng: typeof coords.longitude === 'number' ? coords.longitude : undefined,
+            altitude: typeof coords.altitude === 'number' ? coords.altitude : undefined,
+            address: undefined,
+          };
+          if (typeof geo.lat === 'number' && typeof geo.lng === 'number') {
+            try {
+              const rev = await Location.reverseGeocodeAsync({ latitude: geo.lat, longitude: geo.lng });
+              const a = Array.isArray(rev) ? rev[0] : null;
+              geo.address = formatAddress(a) || `Coordinates: ${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)}`;
+            } catch (_) {
+              geo.address = `Coordinates: ${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)}`;
+            }
+          }
+        }
+      } catch (_) {
+        const fallback = await new Promise((resolve) => {
+          const nav = typeof navigator !== 'undefined' ? navigator : null;
+          if (!nav || !nav.geolocation) return resolve({ lat: undefined, lng: undefined, altitude: undefined, address: undefined });
+          try {
+            nav.geolocation.getCurrentPosition(
+              (pos) => {
+                const crd = pos && pos.coords ? pos.coords : {};
+                resolve({
+                  lat: typeof crd.latitude === 'number' ? crd.latitude : undefined,
+                  lng: typeof crd.longitude === 'number' ? crd.longitude : undefined,
+                  altitude: typeof crd.altitude === 'number' ? crd.altitude : undefined,
+                  address: undefined,
+                });
+              },
+              () => resolve({ lat: undefined, lng: undefined, altitude: undefined, address: undefined }),
+              { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 },
+            );
+          } catch (_) {
+            resolve({ lat: undefined, lng: undefined, altitude: undefined, address: undefined });
+          }
+        });
+        geo = fallback;
+      }
+
+      const items = products.map((p) => ({ name: p.name, size: p.size, qty: Number(p.qty) || 0, price: Number(p.price) || 0 }));
+      const payload = {
+        orderDate,
+        paymentMethod,
+        remarks,
+        items,
+        proof,
+        checkInLat: typeof geo.lat === 'number' ? geo.lat : undefined,
+        checkInLng: typeof geo.lng === 'number' ? geo.lng : undefined,
+        checkInAltitude: typeof geo.altitude === 'number' ? geo.altitude : undefined,
+        checkInAddress: geo.address || undefined,
+      };
+      if (phone) payload.phone = phone;
       if (assignedJobId) payload.assignedJobId = assignedJobId;
       else if (clientId) payload.clientId = clientId;
 
@@ -248,9 +367,9 @@ export default function OrderFormScreen() {
           Create or update customer order details and attach proof.
         </Text>
 
-        <View style={{ backgroundColor: '#fff', padding: 12,  marginBottom: 12 }}>
+        <View style={{ backgroundColor: '#fff', padding: 12, marginBottom: 12 }}>
           <View style={{ marginBottom: 10 }}>
-            <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginBottom: 6 }}>Client name</Text>
+            <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginBottom: 6 }}>Client name <Text style={{ color: '#EF4444' }}>*</Text></Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: 8, borderWidth: 1, borderColor: '#E6EEFF', paddingVertical: 13, paddingHorizontal: 12 }}>
               <Image source={require('../assets/uki.png')} style={{ width: 14, height: 14, marginRight: 8 }} />
               <TextInput value={clientName} onChangeText={setClientName} editable={!assignedJobId} placeholder="Enter client name" placeholderTextColor="#9CA3AF" style={{ flex: 1, color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12, outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' }} />
@@ -284,16 +403,46 @@ export default function OrderFormScreen() {
         <View style={{ backgroundColor: '#FFFFFF', padding: 12, marginBottom: 12 }}>
           <Text style={{ color: '#1F2937', fontFamily: 'Inter_600SemiBold', fontSize: 12, marginBottom: 10 }}>Products info</Text>
 
+          {/* Master Product Selection Section */}
+          <View style={{ marginBottom: 16 }}>
+            <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 11, marginBottom: 6 }}>Select Product from Master List</Text>
+            <TouchableOpacity
+              onPress={() => setShowMasterModal(true)}
+              style={{
+                backgroundColor: '#F3F4F6',
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: '#E6EEFF',
+                paddingVertical: 13,
+                paddingHorizontal: 12,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}
+            >
+              <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>
+                {loadingMaster ? 'Loading master products...' : 'Tap here to choose product from list'}
+              </Text>
+              <Image source={require('../assets/uki.png')} style={{ width: 14, height: 14, tintColor: '#125EC9' }} />
+            </TouchableOpacity>
+          </View>
+
           {products.length === 0 ? (
             <View style={{ paddingVertical: 12 }}>
-              <Text style={{ color:'#6B7280', fontFamily:'Inter_400Regular', fontSize:12, marginBottom:10 }}>No products added.</Text>
-              <View style={{ alignItems:'flex-start' }}>
+              <Text style={{ color: '#6B7280', fontFamily: 'Inter_400Regular', fontSize: 12, marginBottom: 10 }}>No products added to this order.</Text>
+              <View style={{ alignItems: 'flex-start' }}>
                 <TouchableOpacity onPress={addProduct} style={{ backgroundColor: '#125EC9', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6 }}>
-                  <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_400Regular', fontSize: 12 }}>+ Add Product</Text>
+                  <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_400Regular', fontSize: 12 }}>+ Add Manual Product</Text>
                 </TouchableOpacity>
               </View>
             </View>
-          ) : null}
+          ) : (
+            <View style={{ alignItems: 'flex-end', marginBottom: 10 }}>
+              <TouchableOpacity onPress={addProduct} style={{ backgroundColor: '#125EC9', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6 }}>
+                <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_400Regular', fontSize: 12 }}>+ Add Manual Product</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {products.map((p) => {
             const amount = (Number(p.qty) || 0) * (Number(p.price) || 0);
@@ -305,11 +454,13 @@ export default function OrderFormScreen() {
                     <Image source={require('../assets/seam.png')} style={{ width: 16, height: 16, marginRight: 6 }} />
                     <Text style={{ color: '#111827', fontFamily: 'Inter_600SemiBold', fontSize: 12 }}>{p.name}</Text>
                   </View>
-                  <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12 }}>Value</Text>
+                  <TouchableOpacity onPress={() => removeProduct(p.id)} style={{ paddingHorizontal: 4 }}>
+                    <Text style={{ color: '#DC2626', fontFamily: 'Inter_500Medium', fontSize: 11 }}>Remove</Text>
+                  </TouchableOpacity>
                 </View>
 
                 {/* Rows: label left, value right */}
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15,marginTop:20 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, marginTop: 20 }}>
                   <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>Product size</Text>
                   <Text style={{ color: '#454545', fontFamily: 'Inter_400Medium', fontSize: 12, minWidth: 80, textAlign: 'right' }}>{p.size}</Text>
                 </View>
@@ -351,7 +502,7 @@ export default function OrderFormScreen() {
             <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>₹ {totals.total}</Text>
           </View>
         </View>
-        
+
 
         <View style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', padding: 12, marginBottom: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
@@ -406,42 +557,105 @@ export default function OrderFormScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Add Product Modal */}
+      {/* Master Products List Modal */}
+      {showMasterModal ? (
+        <Modal transparent animationType="slide" visible onRequestClose={() => setShowMasterModal(false)}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }} onPress={() => setShowMasterModal(false)}>
+            <Pressable style={{ backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '80%', paddingBottom: 30 }} onPress={(e) => e.stopPropagation()}>
+              <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: '#111827' }}>Select Product</Text>
+                <TouchableOpacity onPress={() => setShowMasterModal(false)}>
+                  <Text style={{ color: '#125EC9', fontWeight: '500' }}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Internal search in modal if needed, or just list */}
+              <View style={{ padding: 12 }}>
+                <View style={{ backgroundColor: '#F9FAFB', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', paddingHorizontal: 12, marginBottom: 12 }}>
+                  <TextInput
+                    value={productSearch}
+                    onChangeText={setProductSearch}
+                    placeholder="Search master list..."
+                    style={{ height: 40, fontSize: 13 }}
+                  />
+                </View>
+
+                {loadingMaster && <ActivityIndicator color="#125EC9" style={{ marginVertical: 20 }} />}
+
+                {!loadingMaster && (
+                  <ScrollView style={{ minHeight: 100 }}>
+                    {filteredMasterProducts.length === 0 ? (
+                      <View style={{ padding: 40, alignItems: 'center' }}>
+                        <Text style={{ color: '#9CA3AF' }}>No products found</Text>
+                        <TouchableOpacity onPress={loadMasterProducts} style={{ marginTop: 10 }}>
+                          <Text style={{ color: '#125EC9' }}>Try Refreshing</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      filteredMasterProducts.map((p) => (
+                        <TouchableOpacity
+                          key={p.id}
+                          onPress={() => {
+                            onSelectMasterProduct(p);
+                            setShowMasterModal(false);
+                          }}
+                          style={{ paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', px: 4 }}
+                        >
+                          <Text style={{ fontSize: 14, fontWeight: '500', color: '#111827' }}>{p.name} {p.size ? `(${p.size})` : ''}</Text>
+                          <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>Price: ₹{p.defaultPrice}</Text>
+                        </TouchableOpacity>
+                      ))
+                    )}
+                  </ScrollView>
+                )}
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      ) : null}
       {showProductModal ? (
         <Modal transparent animationType="fade" visible onRequestClose={() => setShowProductModal(false)}>
-          <Pressable style={{ flex:1, backgroundColor:'rgba(0,0,0,0.35)', alignItems:'center', justifyContent:'center', padding:20 }} onPress={() => setShowProductModal(false)}>
-            <Pressable style={{ width:'100%', maxWidth:360, backgroundColor:'#fff', borderRadius:16, overflow:'hidden' }} onPress={(e) => e.stopPropagation()}>
-              <View style={{ paddingHorizontal:16, paddingTop:14, paddingBottom:10, borderBottomWidth:1, borderBottomColor:'#454545', flexDirection:'row', alignItems:'center', justifyContent:'space-between' }}>
-                <Text style={{ color:'#454545', fontFamily:'Inter_500Medium', fontSize:14 }}>Add new product</Text>
-                <TouchableOpacity onPress={() => setShowProductModal(false)}><Text style={{ color:'#6B7280', fontSize:18 }}>✕</Text></TouchableOpacity>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center', padding: 20 }} onPress={() => setShowProductModal(false)}>
+            <Pressable style={{ width: '100%', maxWidth: 360, backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' }} onPress={(e) => e.stopPropagation()}>
+              <View style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#454545', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={{ color: '#454545', fontFamily: 'Inter_500Medium', fontSize: 14 }}>Add product</Text>
+                <TouchableOpacity onPress={() => setShowProductModal(false)}><Text style={{ color: '#6B7280', fontSize: 18 }}>✕</Text></TouchableOpacity>
               </View>
-              <View style={{ padding:16 }}>
-                <Text style={{ color:'#6B7280', fontFamily:'Inter_500Medium', fontSize:12, marginBottom:6 }}>Name</Text>
-                <View style={{ backgroundColor:'#FFFFFF', borderRadius:8, borderWidth:1, borderColor:'#C4C4C4', paddingVertical:13, paddingHorizontal:12, marginBottom:12 }}>
-                  <TextInput value={newProd.name} onChangeText={(v)=>setNewProd((p)=>({...p,name:v}))} placeholder="Add product name" placeholderTextColor="#9CA3AF" style={{ color:'#454545', fontFamily:'Inter_400Regular', fontSize:12, outlineStyle:'none', outlineWidth:0, outlineColor:'transparent' }} />
+              <View style={{ padding: 16 }}>
+                <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginBottom: 10 }}>Product Details (Enter Manually)</Text>
+
+                <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 11, marginBottom: 4 }}>Name</Text>
+                <View style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#C4C4C4', paddingVertical: 10, paddingHorizontal: 12, marginBottom: 10 }}>
+                  <TextInput value={newProd.name} onChangeText={(v) => setNewProd((p) => ({ ...p, name: v }))} placeholder="Product name" placeholderTextColor="#9CA3AF" style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12, outlineStyle: 'none' }} />
                 </View>
 
-                <Text style={{ color:'#6B7280', fontFamily:'Inter_500Medium', fontSize:12, marginBottom:6 }}>Size</Text>
-                <View style={{ backgroundColor:'#FFFFFF', borderRadius:8, borderWidth:1, borderColor:'#C4C4C4', paddingVertical:13, paddingHorizontal:12, marginBottom:12 }}>
-                  <TextInput value={newProd.size} onChangeText={(v)=>setNewProd((p)=>({...p,size:v}))} placeholder="Add product size" placeholderTextColor="#9CA3AF" style={{ color:'#454545', fontFamily:'Inter_400Regular', fontSize:12, outlineStyle:'none', outlineWidth:0, outlineColor:'transparent' }} />
+                <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 11, marginBottom: 4 }}>Size</Text>
+                <View style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#C4C4C4', paddingVertical: 10, paddingHorizontal: 12, marginBottom: 10 }}>
+                  <TextInput value={newProd.size} onChangeText={(v) => setNewProd((p) => ({ ...p, size: v }))} placeholder="Product size" placeholderTextColor="#9CA3AF" style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12, outlineStyle: 'none' }} />
                 </View>
 
-                <Text style={{ color:'#6B7280', fontFamily:'Inter_500Medium', fontSize:12, marginBottom:6 }}>Product Qty</Text>
-                <View style={{ flexDirection:'row', alignItems:'center', gap:8, marginBottom:12 }}>
-                  <TouchableOpacity onPress={()=>setNewProd(p=>({...p, qty: Math.max(0, Number(p.qty)-1)}))} style={{ width:34, height:34, borderRadius:6, backgroundColor:'#FFFFFF', borderWidth:1, borderColor:'#c4c4c4', alignItems:'center', justifyContent:'center' }}><Text style={{ color:'#454545', fontFamily:'Inter_600SemiBold' }}>−</Text></TouchableOpacity>
-                  <View style={{ minWidth:50, paddingHorizontal:12, height:34, borderRadius:6, backgroundColor:'#FFFFFF', borderWidth:1, borderColor:'#c4c4c4', alignItems:'center', justifyContent:'center' }}>
-                    <Text style={{ color:'#454545', fontFamily:'Inter_400Regular', fontSize:12 }}>{newProd.qty}</Text>
+                <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 11, marginBottom: 4 }}>Qty</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <TouchableOpacity onPress={() => setNewProd(p => ({ ...p, qty: Math.max(0, Number(p.qty) - 1) }))} style={{ width: 34, height: 34, borderRadius: 6, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#c4c4c4', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#454545', fontWeight: '600' }}>−</Text></TouchableOpacity>
+                      <View style={{ flex: 1, height: 34, borderRadius: 6, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#c4c4c4', alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={{ color: '#454545', fontSize: 12 }}>{newProd.qty}</Text>
+                      </View>
+                      <TouchableOpacity onPress={() => setNewProd(p => ({ ...p, qty: Number(p.qty) + 1 }))} style={{ width: 34, height: 34, borderRadius: 6, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#c4c4c4', alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#454545', fontWeight: '600' }}>+</Text></TouchableOpacity>
+                    </View>
                   </View>
-                  <TouchableOpacity onPress={()=>setNewProd(p=>({...p, qty: Number(p.qty)+1}))} style={{ width:34, height:34, borderRadius:6, backgroundColor:'#FFFFFF', borderWidth:1, borderColor:'#c4c4c4', alignItems:'center', justifyContent:'center' }}><Text style={{ color:'#454545', fontFamily:'Inter_600SemiBold' }}>+</Text></TouchableOpacity>
+
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 11, marginBottom: 4 }}>Rate (₹)</Text>
+                    <View style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#c4c4c4', paddingVertical: 10, paddingHorizontal: 12, height: 34, justifyContent: 'center' }}>
+                      <TextInput value={String(newProd.price)} onChangeText={(v) => setNewProd((p) => ({ ...p, price: v.replace(/[^0-9]/g, '') }))} keyboardType="numeric" placeholder="₹" placeholderTextColor="#9CA3AF" style={{ color: '#454545', fontSize: 12, outlineStyle: 'none' }} />
+                    </View>
+                  </View>
                 </View>
 
-                <Text style={{ color:'#6B7280', fontFamily:'Inter_500Medium', fontSize:12, marginBottom:6 }}>Product rate</Text>
-                <View style={{ backgroundColor:'#FFFFFF', borderRadius:8, borderWidth:1, borderColor:'#c4c4c4', paddingVertical:13, paddingHorizontal:12, marginBottom:16 }}>
-                  <TextInput value={String(newProd.price)} onChangeText={(v)=>setNewProd((p)=>({...p,price: v.replace(/[^0-9]/g,'')}))} keyboardType="numeric" placeholder="₹" placeholderTextColor="#9CA3AF" style={{ color:'#454545', fontFamily:'Inter_400Regular', fontSize:12, outlineStyle:'none', outlineWidth:0, outlineColor:'transparent' }} />
-                </View>
-
-                <TouchableOpacity onPress={submitNewProduct} style={{ backgroundColor:'#125EC9', paddingVertical:12, borderRadius:8, alignItems:'center' }}>
-                  <Text style={{ color:'#FFFFFF', fontFamily:'Inter_600SemiBold', fontSize:14 }}>Submit</Text>
+                <TouchableOpacity onPress={submitNewProduct} style={{ backgroundColor: '#125EC9', paddingVertical: 12, borderRadius: 8, alignItems: 'center', marginTop: 8 }}>
+                  <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_600SemiBold', fontSize: 14 }}>Submit</Text>
                 </TouchableOpacity>
               </View>
             </Pressable>
@@ -455,9 +669,9 @@ export default function OrderFormScreen() {
       ) : null}
       {showDate && Platform.OS === 'web' ? (
         <Modal transparent animationType="fade" visible onRequestClose={() => setShowDate(false)}>
-          <Pressable style={{ flex:1, backgroundColor:'rgba(0,0,0,0.35)', alignItems:'center', justifyContent:'center', padding:20 }} onPress={() => setShowDate(false)}>
-            <View style={{ width:'100%', maxWidth:320, backgroundColor:'#fff', borderRadius:12, padding:16 }}>
-              <Text style={{ color:'#111827', fontFamily:'Inter_600SemiBold', marginBottom:12 }}>Select date & time</Text>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center', padding: 20 }} onPress={() => setShowDate(false)}>
+            <View style={{ width: '100%', maxWidth: 320, backgroundColor: '#fff', borderRadius: 12, padding: 16 }}>
+              <Text style={{ color: '#111827', fontFamily: 'Inter_600SemiBold', marginBottom: 12 }}>Select date & time</Text>
               <input
                 type="datetime-local"
                 value={orderDate ? orderDate.toISOString().slice(0, 16) : ''}
@@ -478,8 +692,8 @@ export default function OrderFormScreen() {
                   outline: 'none'
                 }}
               />
-              <TouchableOpacity onPress={() => setShowDate(false)} style={{ marginTop:12, alignSelf:'flex-end', backgroundColor:'#0F3B8C', borderRadius:8, paddingVertical:10, paddingHorizontal:16 }}>
-                <Text style={{ color:'#fff', fontFamily:'Inter_600SemiBold' }}>Done</Text>
+              <TouchableOpacity onPress={() => setShowDate(false)} style={{ marginTop: 12, alignSelf: 'flex-end', backgroundColor: '#0F3B8C', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 16 }}>
+                <Text style={{ color: '#fff', fontFamily: 'Inter_600SemiBold' }}>Done</Text>
               </TouchableOpacity>
             </View>
           </Pressable>
@@ -489,20 +703,20 @@ export default function OrderFormScreen() {
       {/* Client Picker Modal */}
       {clientPickerVisible ? (
         <Modal transparent animationType="fade" visible onRequestClose={() => setClientPickerVisible(false)}>
-          <Pressable style={{ flex:1, backgroundColor:'rgba(0,0,0,0.35)', alignItems:'center', justifyContent:'center', padding:20 }} onPress={() => setClientPickerVisible(false)}>
-            <Pressable style={{ width:'100%', maxWidth:360, backgroundColor:'#fff', borderRadius:16, overflow:'hidden' }} onPress={(e)=>e.stopPropagation()}>
-              <View style={{ paddingHorizontal:16, paddingTop:14, paddingBottom:10, borderBottomWidth:1, borderBottomColor:'#454545', flexDirection:'row', alignItems:'center', justifyContent:'space-between' }}>
-                <Text style={{ color:'#454545', fontFamily:'Inter_500Medium', fontSize:14 }}>Select Client</Text>
-                <TouchableOpacity onPress={() => setClientPickerVisible(false)}><Text style={{ color:'#6B7280', fontSize:18 }}>✕</Text></TouchableOpacity>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center', padding: 20 }} onPress={() => setClientPickerVisible(false)}>
+            <Pressable style={{ width: '100%', maxWidth: 360, backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' }} onPress={(e) => e.stopPropagation()}>
+              <View style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#454545', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={{ color: '#454545', fontFamily: 'Inter_500Medium', fontSize: 14 }}>Select Client</Text>
+                <TouchableOpacity onPress={() => setClientPickerVisible(false)}><Text style={{ color: '#6B7280', fontSize: 18 }}>✕</Text></TouchableOpacity>
               </View>
-              <View style={{ maxHeight:360, padding:12 }}>
+              <View style={{ maxHeight: 360, padding: 12 }}>
                 {loadingClients ? (
-                  <View style={{ paddingVertical:20, alignItems:'center' }}><ActivityIndicator color="#125EC9" /></View>
+                  <View style={{ paddingVertical: 20, alignItems: 'center' }}><ActivityIndicator color="#125EC9" /></View>
                 ) : (
-                  clientOptions.map((c)=> (
-                    <TouchableOpacity key={String(c.id)} onPress={()=>onSelectClient(c)} style={{ paddingVertical:10, borderBottomWidth:1, borderBottomColor:'#E5E7EB' }}>
-                      <Text style={{ color:'#111827', fontFamily:'Inter_500Medium' }}>{c.name}</Text>
-                      {!!c.phone && <Text style={{ color:'#6B7280', fontFamily:'Inter_400Regular', fontSize:12 }}>{c.phone}</Text>}
+                  clientOptions.map((c) => (
+                    <TouchableOpacity key={String(c.id)} onPress={() => onSelectClient(c)} style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' }}>
+                      <Text style={{ color: '#111827', fontFamily: 'Inter_500Medium' }}>{c.name}</Text>
+                      {!!c.phone && <Text style={{ color: '#6B7280', fontFamily: 'Inter_400Regular', fontSize: 12 }}>{c.phone}</Text>}
                     </TouchableOpacity>
                   ))
                 )}

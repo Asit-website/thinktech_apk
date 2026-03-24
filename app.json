@@ -3,6 +3,13 @@
     "name": "Vetansutra",
     "slug": "vetansutra",
     "version": "1.0.0",
+    "updates": {
+      "url": "https://u.expo.dev/dd92ca67-f9be-4de2-ae84-449bde2da45e"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "icon": "./assets/app-icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "splash": {
@@ -14,10 +21,18 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.vetansutra.mobile"
+      "bundleIdentifier": "com.vetansutra.mobile",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.vetansutra.mobile",
+      "targetSdkVersion": 35,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/app-icon.png",
+        "backgroundColor": "#ffffff"
+      },
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
@@ -26,6 +41,9 @@
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.INTERNET"
       ]
     },
@@ -46,6 +64,16 @@
         }
       ],
       [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Vetansutra to track your location in background for attendance.",
+          "locationAlwaysPermission": "Allow Vetansutra to track your location in background for attendance.",
+          "locationWhenInUsePermission": "Allow Vetansutra to access your location for check-in.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "Allow Godown Management to access your photos for slip images."
@@ -54,7 +82,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "437f91d3-2f45-4329-9f92-44827854b3dc"
+        "projectId": "dd92ca67-f9be-4de2-ae84-449bde2da45e"
       }
     }
   }

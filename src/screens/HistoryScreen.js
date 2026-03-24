@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Modal, Pressable, LayoutAnimation, Platform, UIManager, ActivityIndicator, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import BottomNav from '../components/BottomNav';
-import { getAttendanceHistory } from '../config/api';
+import { getAttendanceHistory, getMe } from '../config/api';
 
 export default function HistoryScreen({ navigation }) {
   const [month, setMonth] = useState(null); // { label, value: 'YYYY-MM' }
@@ -11,6 +11,7 @@ export default function HistoryScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState(null);
   const [personName, setPersonName] = useState('');
+  const [staffStartMonth, setStaffStartMonth] = useState(null);
 
   useEffect(() => {
     if (Platform.OS === 'android' && UIManager && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -20,16 +21,26 @@ export default function HistoryScreen({ navigation }) {
 
   const months = useMemo(() => {
     const now = new Date();
+    const start = staffStartMonth ? new Date(staffStartMonth.getFullYear(), staffStartMonth.getMonth(), 1) : null;
     const list = [];
-    for (let i = 0; i < 12; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    let d = new Date(now.getFullYear(), now.getMonth(), 1);
+    while (true) {
       const yyyy = d.getFullYear();
       const mm = String(d.getMonth() + 1).padStart(2, '0');
       const label = d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
       list.push({ label, value: `${yyyy}-${mm}` });
+      // stop if next prev is before staff start
+      const prev = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+      if (start && (prev < start || prev.getTime() === start.getTime())) {
+        list.push({ label: start.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }), value: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}` });
+        break;
+      }
+      d = prev;
+      // safety cap at 36 months
+      if (list.length > 36) break;
     }
     return list;
-  }, []);
+  }, [staffStartMonth]);
 
   useEffect(() => {
     if (!month && months.length) setMonth(months[0]);
@@ -44,6 +55,25 @@ export default function HistoryScreen({ navigation }) {
       } catch (e) {
         setPersonName('');
       }
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const me = await getMe();
+        const user = me?.success ? me.user : null;
+        if (user) {
+          const candidates = [user?.profile?.dateOfJoining, user?.createdAt, user?.profile?.createdAt].filter(Boolean);
+          for (const c of candidates) {
+            const d = new Date(c);
+            if (!Number.isNaN(d.getTime())) {
+              setStaffStartMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+              break;
+            }
+          }
+        }
+      } catch (_) { }
     })();
   }, []);
 
@@ -78,8 +108,11 @@ export default function HistoryScreen({ navigation }) {
       HalfDay: '#FFFFFF',
       Leave: '#FFFFFF',
       Overtime: '#CFF6FF',
+      Holiday: '#FFFDC4',
+      'Weekly Off': '#F3F4F6',
       // fallback mappings
       Late: '#F2E8FF',
+      Penalty: '#FFE2E2',
       Hours: '#E8F2FF',
     };
     const bg = map[label] || '#F3F4F6';
@@ -96,9 +129,11 @@ export default function HistoryScreen({ navigation }) {
       { x: 'HalfDay', y: Number(s.halfDay || 0) },
       { x: 'Leave', y: Number(s.leave || 0) },
       { x: 'Overtime', y: Number(s.overtime || 0) },
+      { x: 'Holiday', y: Number(s.holiday || 0) },
+      { x: 'Weekly Off', y: Number(s.weeklyOff || 0) },
     ];
   }, [history?.summary]);
-  const progressColors = ['#0090F6', '#CA0000', '#999400', '#9500F8', '#007B80'];
+  const progressColors = ['#0090F6', '#CA0000', '#999400', '#9500F8', '#007B80', '#FFAB00', '#6B7280'];
 
   const workDays = useMemo(() => {
     const days = Array.isArray(history?.days) ? history.days : [];
@@ -108,7 +143,7 @@ export default function HistoryScreen({ navigation }) {
       const h = Math.floor(s / 3600);
       const m = Math.floor((s % 3600) / 60);
       const remainingSecs = s % 60;
-      
+
       if (h === 0 && m === 0 && remainingSecs > 0) {
         return `${remainingSecs} sec`;
       }
@@ -132,11 +167,28 @@ export default function HistoryScreen({ navigation }) {
       .reverse()
       .map((d) => {
         const tokens = [];
-        if (d.dayStatus === 'PRESENT') tokens.push({ t: 'Present', v: toHM(d.workingSeconds) });
-        if (d.dayStatus === 'OVERTIME') tokens.push({ t: 'Overtime', v: toHM(d.overtimeSeconds) });
-        if (d.dayStatus === 'HALF_DAY') tokens.push({ t: 'Half Day', v: toHM(d.workingSeconds) });
+        const workedSeconds = Number(
+          d.totalDurationSeconds
+          || d.workingSeconds
+          || (Number(d.totalWorkHours || 0) > 0 ? Number(d.totalWorkHours) * 3600 : 0)
+          || 0
+        );
+
+        if (d.dayStatus === 'PRESENT') tokens.push({ t: 'Present', v: toHM(workedSeconds) });
+        if (d.dayStatus === 'OVERTIME') tokens.push({ t: 'Overtime', v: toHM(workedSeconds) });
+        if (d.dayStatus === 'HALF_DAY') tokens.push({ t: 'Half Day', v: toHM(workedSeconds) });
         if (d.dayStatus === 'ABSENT') tokens.push({ t: 'Absent', v: '1' });
         if (d.dayStatus === 'LEAVE') tokens.push({ t: 'Leave', v: d.leaveType || 'Leave' });
+        if (d.dayStatus === 'HOLIDAY') tokens.push({ t: 'Holiday', v: 'Paid' });
+        if (d.dayStatus === 'WEEKLY_OFF') tokens.push({ t: 'Weekly Off', v: 'Off' });
+
+        if (d.isPenaltyDay) tokens.push({ t: 'Penalty', v: 'Late' });
+        else if (d.isLate) tokens.push({ t: 'Late', v: 'arrival' });
+
+        if (d.reason && (d.isLate || d.dayStatus === 'ABSENT')) {
+          // If we have a specific reason (like late penalty) show it as a token if not already
+          if (!d.isPenaltyDay && !d.isLate) tokens.push({ t: 'Note', v: d.reason });
+        }
 
         if (Number(d.breakSeconds || 0) > 0) tokens.push({ t: 'Break', v: toHM(d.breakSeconds) });
 
@@ -152,7 +204,7 @@ export default function HistoryScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={[styles.backBtn, { flexDirection: 'row', alignItems: 'center',height:70 }]}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={[styles.backBtn, { flexDirection: 'row', alignItems: 'center', height: 70 }]}>
           <Image source={require('../assets/arrow.png')} style={{ width: 18, height: 12, marginRight: 8 }} />
           <Text style={styles.headerTitle}>History</Text>
         </TouchableOpacity>
@@ -165,8 +217,8 @@ export default function HistoryScreen({ navigation }) {
             onPress={() => {
               const list = months;
               const i = list.findIndex((m) => m.value === month?.value);
-              const next = list[(i - 1 + list.length) % list.length];
-              setMonth(next);
+              const nextIdx = Math.max(0, i - 1);
+              setMonth(list[nextIdx]);
             }}
             style={styles.monthArrow}
             activeOpacity={0.7}
@@ -185,8 +237,8 @@ export default function HistoryScreen({ navigation }) {
             onPress={() => {
               const list = months;
               const i = list.findIndex((m) => m.value === month?.value);
-              const next = list[(i + 1) % list.length];
-              setMonth(next);
+              const nextIdx = Math.min(list.length - 1, i + 1);
+              setMonth(list[nextIdx]);
             }}
             style={styles.monthArrow}
             activeOpacity={0.7}
@@ -202,12 +254,16 @@ export default function HistoryScreen({ navigation }) {
             { label: 'Absent', value: String(history?.summary?.absent ?? 0), bg: '#FFE2E2', cl: '#CA0000' },
             { label: 'HalfDay', value: String(history?.summary?.halfDay ?? 0), bg: '#FFFDC4', cl: '#999400' },
             { label: 'Leave', value: String(history?.summary?.leave ?? 0), bg: '#EBDFFF', cl: '#9500F8' },
+            { label: 'Weekly Off', value: String(history?.summary?.weeklyOff ?? 0), bg: '#F3F4F6', cl: '#6B7280' },
+            { label: 'Holiday', value: String(history?.summary?.holiday ?? 0), bg: '#FFFDC4', cl: '#FFAB00' },
             { label: 'Overtime', value: String(history?.summary?.overtime ?? 0), bg: '#CFF6FF', cl: '#007B80' },
+            { label: 'Late', value: String(history?.summary?.lateCount ?? 0), bg: '#F2E8FF', cl: '#9500F8' },
+            { label: 'Penalty', value: String(history?.summary?.latePenaltyDays ?? 0), bg: '#FFE2E2', cl: '#CA0000' },
             { label: 'Fine', value: '0', bg: '#FFCDDB', cl: '#007B80' },
           ].map((s) => (
-            <View key={s.label} style={[styles.statCard, { backgroundColor: s.bg,color:s.cl }]}>
-              <Text style={[styles.statLabel, {color:s.cl }]}>{s.label}</Text>
-              <Text style={[styles.statValue, {color:s.cl }]}>{s.value}</Text>
+            <View key={s.label} style={[styles.statCard, { backgroundColor: s.bg, color: s.cl }]}>
+              <Text style={[styles.statLabel, { color: s.cl }]}>{s.label}</Text>
+              <Text style={[styles.statValue, { color: s.cl }]}>{s.value}</Text>
             </View>
           ))}
         </View>
@@ -234,14 +290,14 @@ export default function HistoryScreen({ navigation }) {
                         <Text style={styles.progressValue}>{item.y} days</Text>
                       </View>
                       <View style={styles.progressBarContainer}>
-                        <View 
+                        <View
                           style={[
-                            styles.progressBar, 
-                            { 
+                            styles.progressBar,
+                            {
                               backgroundColor: progressColors[index],
                               width: `${Math.max(percentage, 2)}%` // Minimum 2% width for visibility
                             }
-                          ]} 
+                          ]}
                         />
                       </View>
                       <Text style={styles.progressPercentage}>{percentage.toFixed(1)}%</Text>
@@ -282,7 +338,7 @@ export default function HistoryScreen({ navigation }) {
                     {d.tokens.map((t) => (
                       <View key={t.t} style={[styles.token, tokenBgStyle(t.t)]}>
                         <Text style={styles.tokenTitle}>{t.t}</Text>
-                        <Text style={styles.tokenValue}>{t.v}</Text>
+                        <Text style={[styles.tokenValue, t.v.length > 20 ? { fontSize: 10 } : null]}>{t.v}</Text>
                       </View>
                     ))}
                   </View>
@@ -349,17 +405,17 @@ const styles = StyleSheet.create({
     width: '30%', minWidth: 90, paddingVertical: 12, borderRadius: 10,
     alignItems: 'center', justifyContent: 'center',
   },
-  statValue: { fontFamily: 'Inter_700Bold', color: '#1f2c3a', marginBottom: 4,fontSize:16,marginTop:4 },
+  statValue: { fontFamily: 'Inter_700Bold', color: '#1f2c3a', marginBottom: 4, fontSize: 16, marginTop: 4 },
   statLabel: { fontFamily: 'Inter_400Regular', color: '#6B7280', fontSize: 10 },
 
   section: { marginTop: 8, marginBottom: 12 },
-  sectionTitle: { fontFamily: ' Inter_500Medium', color: '#454545', marginBottom: 8,fontSize:13 },
+  sectionTitle: { fontFamily: ' Inter_500Medium', color: '#454545', marginBottom: 8, fontSize: 13 },
 
   // Progress bar styles
-  progressCard: { 
-    padding: 16, 
-    backgroundColor: '#fff', 
-    marginTop: 8, 
+  progressCard: {
+    padding: 16,
+    backgroundColor: '#fff',
+    marginTop: 8,
     marginBottom: 10,
     borderRadius: 12,
     borderWidth: 1,
@@ -367,35 +423,35 @@ const styles = StyleSheet.create({
   },
   progressContainer: { gap: 16 },
   progressItem: { gap: 8 },
-  progressHeader: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center' 
+  progressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center'
   },
-  progressLabel: { 
-    fontFamily: 'Inter_500Medium', 
-    color: '#1f2c3a', 
-    fontSize: 14 
+  progressLabel: {
+    fontFamily: 'Inter_500Medium',
+    color: '#1f2c3a',
+    fontSize: 14
   },
-  progressValue: { 
-    fontFamily: 'Inter_600SemiBold', 
-    color: '#1f2c3a', 
-    fontSize: 14 
+  progressValue: {
+    fontFamily: 'Inter_600SemiBold',
+    color: '#1f2c3a',
+    fontSize: 14
   },
-  progressBarContainer: { 
-    height: 8, 
-    backgroundColor: '#F3F4F6', 
-    borderRadius: 4, 
-    overflow: 'hidden' 
+  progressBarContainer: {
+    height: 8,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 4,
+    overflow: 'hidden'
   },
-  progressBar: { 
-    height: '100%', 
+  progressBar: {
+    height: '100%',
     borderRadius: 4,
     minWidth: 2, // Ensure minimum visibility
   },
-  progressPercentage: { 
-    fontFamily: 'Inter_400Regular', 
-    color: '#6B7280', 
+  progressPercentage: {
+    fontFamily: 'Inter_400Regular',
+    color: '#6B7280',
     fontSize: 12,
     textAlign: 'right',
   },
@@ -410,7 +466,7 @@ const styles = StyleSheet.create({
   tokenRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, padding: 12 },
   token: { borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10 },
   tokenTitle: { fontFamily: 'Inter_400Regular', color: '#6B7280', fontSize: 10 },
-  tokenValue: { fontFamily: 'Inter_700Bold', color: '#1f2c3a',fontSize:16 },
+  tokenValue: { fontFamily: 'Inter_700Bold', color: '#1f2c3a', fontSize: 16 },
 
   modalContainer: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end' },
   modalBackdrop: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.25)' },

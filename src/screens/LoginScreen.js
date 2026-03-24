@@ -45,8 +45,9 @@ export default function LoginScreen({ navigation }) {
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.container}>
         <View style={styles.topArea}>
+          {/* https://res.cloudinary.com/dgif730br/image/upload/v1767436218/thinktech-logo-blue-300x103_1_s4uvih.png */}
           <Image
-            source={{ uri: 'https://res.cloudinary.com/dgif730br/image/upload/v1767436218/thinktech-logo-blue-300x103_1_s4uvih.png' }}
+            source={{ uri: 'https://res.cloudinary.com/dgif730br/image/upload/v1771585917/Screenshot_8880_nmyxse.png' }}
             style={styles.logo}
           />
         </View>
@@ -85,7 +86,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, paddingHorizontal: 20, paddingTop: 24, paddingBottom: 120 },
 
   topArea: { alignItems: 'center', paddingTop: 40 },
-  logo: { width: 190, height: 60, resizeMode: 'contain' },
+  logo: { width: 250, height: 100, resizeMode: 'contain' },
 
   middleArea: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   heading: { color: '#515151', fontFamily: ' Inter_600SemiBold', fontSize: 22, marginBottom: 30 },

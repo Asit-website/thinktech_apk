@@ -9,6 +9,8 @@ import { sendClientOtp, submitVisitForm, getMyProfile, getAssignedJobDetail, lis
 import { useRoute } from '@react-navigation/native';
 
 import { notifySuccess, notifyError, notifyInfo } from '../utils/notify';
+import { formatAddress } from '../services/locationService';
+
 
 import DateTimePicker from '@react-native-community/datetimepicker';
 
@@ -361,46 +363,53 @@ export default function VisitFormScreen({ navigation }) {
     setSubmitting(true);
 
     try {
-
-      let loc = { lat: undefined, lng: undefined };
-
-      const getGeo = () => new Promise((resolve) => {
-
-        const nav = typeof navigator !== 'undefined' ? navigator : null;
-
-        if (!nav || !nav.geolocation) return resolve(loc);
-
-        const opts = { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 };
-
-        try {
-
-          nav.geolocation.getCurrentPosition(
-
-            (pos) => {
-
-              const crd = pos && pos.coords ? pos.coords : {};
-
-              if (typeof crd.latitude === 'number' && typeof crd.longitude === 'number') {
-
-                resolve({ lat: crd.latitude, lng: crd.longitude });
-
-              } else { resolve(loc); }
-
-            },
-
-            () => resolve(loc),
-
-            opts,
-
-          );
-
-        } catch (_) { resolve(loc); }
-
-      });
-
-
-
-      const geo = await getGeo();
+      let geo = { lat: undefined, lng: undefined, altitude: undefined, address: undefined };
+      try {
+        const Location = require('expo-location');
+        const perm = await Location.requestForegroundPermissionsAsync();
+        if (perm?.status === 'granted') {
+          const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          const coords = current?.coords || {};
+          geo = {
+            lat: typeof coords.latitude === 'number' ? coords.latitude : undefined,
+            lng: typeof coords.longitude === 'number' ? coords.longitude : undefined,
+            altitude: typeof coords.altitude === 'number' ? coords.altitude : undefined,
+            address: undefined,
+          };
+          if (typeof geo.lat === 'number' && typeof geo.lng === 'number') {
+            try {
+              const rev = await Location.reverseGeocodeAsync({ latitude: geo.lat, longitude: geo.lng });
+              const a = Array.isArray(rev) ? rev[0] : null;
+              geo.address = formatAddress(a) || `Coordinates: ${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)}`;
+            } catch (_) {
+              geo.address = `Coordinates: ${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)}`;
+            }
+          }
+        }
+      } catch (_) {
+        const fallback = await new Promise((resolve) => {
+          const nav = typeof navigator !== 'undefined' ? navigator : null;
+          if (!nav || !nav.geolocation) return resolve({ lat: undefined, lng: undefined, altitude: undefined, address: undefined });
+          try {
+            nav.geolocation.getCurrentPosition(
+              (pos) => {
+                const crd = pos && pos.coords ? pos.coords : {};
+                resolve({
+                  lat: typeof crd.latitude === 'number' ? crd.latitude : undefined,
+                  lng: typeof crd.longitude === 'number' ? crd.longitude : undefined,
+                  altitude: typeof crd.altitude === 'number' ? crd.altitude : undefined,
+                  address: undefined,
+                });
+              },
+              () => resolve({ lat: undefined, lng: undefined, altitude: undefined, address: undefined }),
+              { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 },
+            );
+          } catch (_) {
+            resolve({ lat: undefined, lng: undefined, altitude: undefined, address: undefined });
+          }
+        });
+        geo = fallback;
+      }
 
       // Validation
       if (!visitDate) {
@@ -470,6 +479,8 @@ export default function VisitFormScreen({ navigation }) {
         checkInLat: typeof geo.lat === 'number' ? geo.lat : undefined,
 
         checkInLng: typeof geo.lng === 'number' ? geo.lng : undefined,
+        checkInAltitude: typeof geo.altitude === 'number' ? geo.altitude : undefined,
+        checkInAddress: geo.address || (location?.trim() ? location.trim() : undefined),
 
       });
 

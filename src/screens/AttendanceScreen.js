@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import BottomNav from '../components/BottomNav';
 import { endBreak, getAttendanceStatus, punchInWithPhoto, punchOutWithPhoto, startBreak, listMyLeaveRequests, getMyLeaveCategories } from '../config/api';
-import { locationTrackingService } from '../services/locationService';
+import { formatAddress, locationTrackingService } from '../services/locationService';
 // NOTE: Avoid static import of expo-location on web to prevent bundler crash; use dynamic import when needed
 import { notifyError, notifyInfo, notifySuccess } from '../utils/notify';
 
@@ -58,16 +58,7 @@ export default function AttendanceScreen({ navigation }) {
     loadStatus();
     loadLeaveBalance();
     const t = setInterval(loadStatus, 5000);
-
-    // Cleanup: stop location tracking when component unmounts
-    return () => {
-      clearInterval(t);
-      try {
-        locationTrackingService.stopTracking();
-      } catch (e) {
-        console.error('Failed to stop location tracking on cleanup:', e);
-      }
-    };
+    return () => clearInterval(t);
   }, []);
 
 
@@ -124,7 +115,7 @@ export default function AttendanceScreen({ navigation }) {
   const canPunchOut = !!status?.punchedInAt && !status?.punchedOutAt;
   const isOnBreak = !!status?.isOnBreak;
 
-  const workingSeconds = Number(status?.workingSeconds || 0);
+  const workingSeconds = Number(status?.totalDurationSeconds || status?.workingSeconds || 0);
   const breakSeconds = Number(status?.breakSeconds || 0);
   const overtimeSeconds = Number(status?.overtimeSeconds || 0);
   const dayStatus = status?.dayStatus || 'ABSENT';
@@ -146,24 +137,19 @@ export default function AttendanceScreen({ navigation }) {
   const mm = Math.floor((workingSeconds % 3600) / 60);
   const ss = Math.floor(workingSeconds % 60);
 
-  const breakLabel = useMemo(() => {
-    const h = Math.floor(breakSeconds / 3600);
-    const m = Math.floor((breakSeconds % 3600) / 60);
-    if (h > 0) return `${h}h ${m}m`;
-    return `${m}m`;
-  }, [breakSeconds]);
+  const formatBreakDuration = (totalSeconds) => {
+    const safe = Math.max(0, Math.floor(Number(totalSeconds || 0)));
+    const h = Math.floor(safe / 3600);
+    const m = Math.floor((safe % 3600) / 60);
+    const s = safe % 60;
+    if (h > 0) return `${h}h:${m}m:${s}sec`;
+    return `${m}m:${s}sec`;
+  };
 
   const breakMmSs = useMemo(() => {
-    const m = String(Math.floor(breakSeconds / 60)).padStart(2, '0');
-    const s = String(Math.floor(breakSeconds % 60)).padStart(2, '0');
-    return `${m}:${s}`;
+    return formatBreakDuration(breakSeconds);
   }, [breakSeconds]);
-
-  const timeoutLabel = useMemo(() => {
-    const m = String(Math.floor(breakSeconds / 60)).padStart(2, '0');
-    const s = String(Math.floor(breakSeconds % 60)).padStart(2, '0');
-    return `${m}:${s}`;
-  }, [breakSeconds]);
+  const timeoutLabel = breakMmSs;
 
   const pickPhoto = async () => {
     console.log('Starting pickPhoto...');
@@ -231,16 +217,25 @@ export default function AttendanceScreen({ navigation }) {
 
         if (perm !== 'granted') throw new Error('Location permission denied');
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        coords = { lat: loc.coords.latitude, lng: loc.coords.longitude, accuracy: loc.coords.accuracy };
+        let addr = null;
+        try {
+          const rev = await Location.reverseGeocodeAsync({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+          addr = formatAddress(rev?.[0]);
+        } catch (_) { }
+
+        coords = {
+          lat: loc.coords.latitude,
+          lng: loc.coords.longitude,
+          accuracy: loc.coords.accuracy,
+          address: addr
+        };
 
       } catch (e) {
-
         // If no geofence is assigned, backend will still allow. We'll pass no coords in that case.
       }
 
       console.log('Making punch-in API call...');
       const res = await punchInWithPhoto(uri, coords);
-
 
       if (res?.success) {
         console.log('Punch-in successful, refreshing status...');
@@ -250,14 +245,17 @@ export default function AttendanceScreen({ navigation }) {
         // Start location tracking after successful punch-in
         try {
           console.log('Starting location tracking...');
-          await locationTrackingService.startTracking(2); // Track every 2 minutes
-          notifyInfo('Location tracking started for your shift.');
+          const trackingStarted = await locationTrackingService.startTracking();
+          if (trackingStarted) {
+            notifyInfo('Location tracking started for your shift (pings every 100m).');
+          } else {
+            notifyInfo('Location permission denied. Enable location access to sync movement data.');
+          }
         } catch (e) {
           console.error('Failed to start location tracking:', e);
-          // Don't show error to user as punch-in was successful
         }
 
-        // Show photo preview after successful punch-in
+        // Show photo preview
         try {
           setPhotoPreview(uri);
           if (photoTimerId) clearTimeout(photoTimerId);
@@ -275,27 +273,48 @@ export default function AttendanceScreen({ navigation }) {
   };
 
   const onPunchOut = async () => {
+    console.log('Starting punch-out process...');
     const uri = await pickPhoto();
     if (!uri) return;
 
     setLoading(true);
     try {
-      const res = await punchOutWithPhoto(uri);
+      // Request location permission and capture coordinates
+      let coords = null;
+      try {
+        const Location = await import('expo-location');
+        const { status: perm } = await Location.requestForegroundPermissionsAsync();
+        if (perm === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          let addr = null;
+          try {
+            const rev = await Location.reverseGeocodeAsync({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+            addr = formatAddress(rev?.[0]);
+          } catch (_) { }
+
+          coords = {
+            lat: loc.coords.latitude,
+            lng: loc.coords.longitude,
+            accuracy: loc.coords.accuracy,
+            address: addr
+          };
+        }
+      } catch (_) { }
+
+      const res = await punchOutWithPhoto(uri, coords);
       if (res?.success) {
         await loadStatus();
         notifySuccess('Punch-out recorded successfully.');
 
-        // Stop location tracking after successful punch-out
+        // Stop location tracking
         try {
-          console.log('Stopping location tracking...');
           locationTrackingService.stopTracking();
           notifyInfo('Location tracking stopped.');
         } catch (e) {
           console.error('Failed to stop location tracking:', e);
-          // Don't show error to user as punch-out was successful
         }
 
-        // Show photo preview after successful punch-out
+        // Show photo preview
         try {
           setPhotoPreview(uri);
           if (photoTimerId) clearTimeout(photoTimerId);
@@ -400,6 +419,7 @@ export default function AttendanceScreen({ navigation }) {
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 7, paddingVertical: 7 }}>
               <Image source={require('../assets/cal.png')} style={{ width: 14, height: 14, tintColor: '#ffffff' }} />
               <Text style={styles.dateText}>{dateLabel}</Text>
+              <Text style={styles.dateText}>Attendence</Text>
             </View>
           </View>
           <View style={styles.statsBox}>

@@ -1,8 +1,11 @@
 import React from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Image, ActivityIndicator, Linking, StyleSheet } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { getAssignedJobDetail, updateAssignedJobStatus } from '../config/api';
 import { notifyError, notifyInfo, notifySuccess } from '../utils/notify';
+
+// Same key used in Admin Geofence settings
+const GOOGLE_MAPS_API_KEY = 'AIzaSyBukqAGI9NioKWUOgzVs0vXrBOg9DnbwLo';
 
 export default function AssignedJobDetailScreen() {
   const route = useRoute();
@@ -21,7 +24,9 @@ export default function AssignedJobDetailScreen() {
         setJob({
           id: j.id,
           client: j.client?.name || 'Client',
-          address: j.client?.location || '',
+          address: j.clientAddress || j.client?.location || '',
+          clientLat: j.clientLat,
+          clientLng: j.clientLng,
           status: j.status || 'pending',
           assignedOn: j.assignedOn ? new Date(j.assignedOn).toDateString() : null,
           dueDate: j.dueDate ? new Date(j.dueDate).toDateString() : null,
@@ -94,6 +99,18 @@ export default function AssignedJobDetailScreen() {
     }
   }, []);
 
+  const handleNavigate = () => {
+    if (job?.clientLat && job?.clientLng) {
+      const url = `https://www.google.com/maps/dir/?api=1&destination=${job.clientLat},${job.clientLng}`;
+      Linking.openURL(url).catch(() => notifyError('Could not open map'));
+    } else if (job?.address) {
+      const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(job.address)}`;
+      Linking.openURL(url).catch(() => notifyError('Could not open map'));
+    } else {
+      notifyInfo('No address or coordinates available for navigation.');
+    }
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: '#fff' }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', paddingHorizontal: 16, paddingTop: 30, paddingBottom: 30, marginLeft: 5, marginRight: 5, borderBottomWidth: 1, borderBottomColor: '#B3B3B3', backgroundColor: '#ffffff', shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 6, elevation: 6, marginBottom: 10 }}>
@@ -132,15 +149,58 @@ export default function AssignedJobDetailScreen() {
 
           {/* Address + description */}
           <View style={{ marginTop: 8 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              {/* <Image source={require('../assets/Path (Stroke).png')} style={{ width: 12, height: 12, marginRight: 6 }} /> */}
-               <Image source={require('../assets/assigned2.png')} style={{ width: 10, height: 13.5 }} />
-              <Text style={{ fontSize: 12, color: '#6B7280', fontFamily: 'Inter_500Medium',marginLeft:6 }}>{job.address}</Text>
-            </View>
+            <TouchableOpacity onPress={handleNavigate} style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Image source={require('../assets/assigned2.png')} style={{ width: 10, height: 13.5 }} />
+              <Text style={{ fontSize: 12, color: '#125EC9', fontFamily: 'Inter_500Medium', marginLeft: 6, textDecorationLine: 'underline' }}>{job.address}</Text>
+            </TouchableOpacity>
             <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 6 }}>
               Visit the client to discuss pricing, order confirmation, and collect feedback.
             </Text>
           </View>
+
+          {/* Map Section */}
+          {(job.clientLat && job.clientLng) || job.address ? (
+            <TouchableOpacity
+              onPress={handleNavigate}
+              style={{
+                marginTop: 16,
+                borderRadius: 12,
+                overflow: 'hidden',
+                backgroundColor: '#E5E7EB',
+                height: 150,
+                position: 'relative',
+                borderWidth: 1,
+                borderColor: '#D1D5DB'
+              }}
+            >
+              <Image
+                source={{
+                  uri: job.clientLat && job.clientLng
+                    ? `https://maps.googleapis.com/maps/api/staticmap?center=${job.clientLat},${job.clientLng}&zoom=15&size=600x300&markers=color:red%7C${job.clientLat},${job.clientLng}&key=${GOOGLE_MAPS_API_KEY}`
+                    : `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(job.address)}&zoom=15&size=600x300&markers=color:red%7C${encodeURIComponent(job.address)}&key=${GOOGLE_MAPS_API_KEY}`
+                }}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode="cover"
+              />
+              <View style={{
+                position: 'absolute',
+                bottom: 8,
+                right: 8,
+                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                paddingHorizontal: 8,
+                paddingVertical: 4,
+                borderRadius: 4,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4
+              }}>
+                <Image source={require('../assets/stoke.png')} style={{ width: 10, height: 10, tintColor: '#125EC9' }} />
+                <Text style={{ fontSize: 10, color: '#125EC9', fontFamily: 'Inter_600SemiBold' }}>Open in Google Maps</Text>
+              </View>
+              {/* Overlay for better click feedback */}
+              <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.02)' }} />
+            </TouchableOpacity>
+          ) : null}
 
           {/* Actions row */}
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
@@ -162,6 +222,13 @@ export default function AssignedJobDetailScreen() {
                 }}>
                   <View style={{ backgroundColor: '#E0ECFF', borderColor: '#E0ECFF', borderWidth: 1, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6, opacity: isLocked ? 0.55 : 1 }}>
                     <Text style={{ color: '#1D4ED8', fontFamily: 'Inter_500Medium', fontSize: 8 }}>Client order</Text>
+                  </View>
+                </TouchableOpacity>
+              ),
+              (
+                <TouchableOpacity key="navigate" onPress={handleNavigate}>
+                  <View style={{ backgroundColor: '#F3F4F6', borderColor: '#E5E7EB', borderWidth: 1, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6 }}>
+                    <Text style={{ color: '#374151', fontFamily: 'Inter_500Medium', fontSize: 8 }}>Navigate</Text>
                   </View>
                 </TouchableOpacity>
               )

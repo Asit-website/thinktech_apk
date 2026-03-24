@@ -145,6 +145,7 @@ export default function SalaryReportScreen({ navigation }) {
     finalNetSalary: 0
   });
   const [salaryTemplate, setSalaryTemplate] = useState(null);
+  const [staffStartMonth, setStaffStartMonth] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [hasAnyAttendance, setHasAnyAttendance] = useState(true);
@@ -161,7 +162,14 @@ export default function SalaryReportScreen({ navigation }) {
     return date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
   };
 
+  const monthStart = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+  const currentMonthStart = monthStart(new Date());
+  const selectedMonthStart = monthStart(selectedDate);
+  const canGoPrevMonth = !staffStartMonth || selectedMonthStart > monthStart(staffStartMonth);
+  const canGoNextMonth = selectedMonthStart < currentMonthStart;
+
   const prevMonth = () => {
+    if (!canGoPrevMonth) return;
     setSelectedDate(prev => {
       const newDate = new Date(prev);
       newDate.setMonth(newDate.getMonth() - 1);
@@ -170,6 +178,7 @@ export default function SalaryReportScreen({ navigation }) {
   };
 
   const nextMonth = () => {
+    if (!canGoNextMonth) return;
     setSelectedDate(prev => {
       const newDate = new Date(prev);
       newDate.setMonth(newDate.getMonth() + 1);
@@ -196,6 +205,8 @@ export default function SalaryReportScreen({ navigation }) {
   const handleWebMonthChange = (monthStr) => {
     const [year, month] = monthStr.split('-').map(Number);
     const newDate = new Date(year, month - 1, 1);
+    if (staffStartMonth && monthStart(newDate) < monthStart(staffStartMonth)) return;
+    if (monthStart(newDate) > currentMonthStart) return;
     setSelectedDate(newDate);
   };
 
@@ -222,6 +233,20 @@ export default function SalaryReportScreen({ navigation }) {
       const user = userResponse?.success ? userResponse.user : null;
       if (user) {
         setSalaryTemplate(user.salaryTemplate || null);
+        const candidates = [
+          user?.profile?.dateOfJoining,
+          user?.createdAt,
+          user?.profile?.createdAt,
+        ].filter(Boolean);
+        let found = null;
+        for (const c of candidates) {
+          const d = new Date(c);
+          if (!Number.isNaN(d.getTime())) {
+            found = new Date(d.getFullYear(), d.getMonth(), 1);
+            break;
+          }
+        }
+        setStaffStartMonth(found);
       }
 
       // Unified compute for the selected month
@@ -335,7 +360,12 @@ export default function SalaryReportScreen({ navigation }) {
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.datePickerCard}>
           <View style={styles.datePickerRow}>
-            <TouchableOpacity style={styles.monthNavButton} activeOpacity={0.7} onPress={prevMonth}>
+            <TouchableOpacity
+              style={[styles.monthNavButton, !canGoPrevMonth ? styles.monthNavButtonDisabled : null]}
+              activeOpacity={0.7}
+              onPress={prevMonth}
+              disabled={!canGoPrevMonth}
+            >
               <Text style={styles.monthNavText}>◀</Text>
             </TouchableOpacity>
 
@@ -344,7 +374,12 @@ export default function SalaryReportScreen({ navigation }) {
               <Text style={styles.datePickerText}>{formatMonthYear(selectedDate)}</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.monthNavButton} activeOpacity={0.7} onPress={nextMonth}>
+            <TouchableOpacity
+              style={[styles.monthNavButton, !canGoNextMonth ? styles.monthNavButtonDisabled : null]}
+              activeOpacity={0.7}
+              onPress={nextMonth}
+              disabled={!canGoNextMonth}
+            >
               <Text style={styles.monthNavText}>▶</Text>
             </TouchableOpacity>
           </View>
@@ -458,6 +493,8 @@ export default function SalaryReportScreen({ navigation }) {
                 type="month"
                 value={`${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`}
                 onChange={(e) => handleWebMonthChange(e.target.value)}
+                min={staffStartMonth ? `${staffStartMonth.getFullYear()}-${String(staffStartMonth.getMonth() + 1).padStart(2, '0')}` : undefined}
+                max={`${currentMonthStart.getFullYear()}-${String(currentMonthStart.getMonth() + 1).padStart(2, '0')}`}
                 style={styles.webDatePicker}
               />
               <View style={styles.datePickerButtons}>
@@ -479,8 +516,8 @@ export default function SalaryReportScreen({ navigation }) {
           mode="date"
           display="default"
           onChange={handleNativeMonthChange}
-          minimumDate={new Date(2020, 0, 1)}
-          maximumDate={new Date(2030, 11, 31)}
+          minimumDate={staffStartMonth || new Date(2020, 0, 1)}
+          maximumDate={currentMonthStart}
         />
       )}
 
@@ -570,6 +607,9 @@ const styles = StyleSheet.create({
     minWidth: 36,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  monthNavButtonDisabled: {
+    opacity: 0.45,
   },
   monthNavText: {
     fontSize: 16,

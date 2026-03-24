@@ -289,10 +289,10 @@ export default function SalesReportScreen({ navigation }) {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.downloadButton} activeOpacity={0.85} onPress={handleDownloadReport}>
+        {/* <TouchableOpacity style={styles.downloadButton} activeOpacity={0.85} onPress={handleDownloadReport}>
           <Image source={require('../assets/vix.png')} style={styles.downloadIcon} />
           <Text style={styles.downloadButtonText}>Download</Text>
-        </TouchableOpacity>
+        </TouchableOpacity> */}
       </ScrollView>
 
       {/* <BottomNav navigation={navigation} activeKey="Sales" /> */}

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
 import BottomNav from '../components/BottomNav';
-import { getAttendanceHistory } from '../config/api';
+import { getAttendanceHistory, getMe } from '../config/api';
 import { notifyError } from '../utils/notify';
 
 function getMonthMatrix(date) {
@@ -18,14 +18,15 @@ function getMonthMatrix(date) {
   return cells;
 }
 
-const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const week = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const week = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export default function CalendarScreen({ navigation }) {
   const [monthDate, setMonthDate] = useState(new Date());
   const [loading, setLoading] = useState(false);
   const [daysByDate, setDaysByDate] = useState({});
   const [selected, setSelected] = useState(null);
+  const [staffStartMonth, setStaffStartMonth] = useState(null);
 
   const matrix = useMemo(() => getMonthMatrix(monthDate), [monthDate]);
 
@@ -38,6 +39,22 @@ export default function CalendarScreen({ navigation }) {
   useEffect(() => {
     let mounted = true;
     (async () => {
+      try {
+        const me = await getMe();
+        const user = me?.success ? me.user : null;
+        if (user) {
+          const candidates = [user?.profile?.dateOfJoining, user?.createdAt, user?.profile?.createdAt].filter(Boolean);
+          for (const c of candidates) {
+            const d = new Date(c);
+            if (!Number.isNaN(d.getTime())) {
+              const start = new Date(d.getFullYear(), d.getMonth(), 1);
+              setStaffStartMonth(start);
+              break;
+            }
+          }
+        }
+      } catch (_) {}
+
       setLoading(true);
       try {
         const res = await getAttendanceHistory(monthKey);
@@ -67,7 +84,16 @@ export default function CalendarScreen({ navigation }) {
     };
   }, [monthKey]);
 
-  const dec = () => setMonthDate((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1));
+  const canGoPrev = useMemo(() => {
+    if (!staffStartMonth) return true;
+    const sel = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+    return sel > staffStartMonth;
+  }, [monthDate, staffStartMonth]);
+
+  const dec = () => {
+    if (!canGoPrev) return;
+    setMonthDate((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1));
+  };
   const inc = () => setMonthDate((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1));
 
   const headerLabel = `${monthNames[monthDate.getMonth()]} ${monthDate.getFullYear()}`;
@@ -87,6 +113,8 @@ export default function CalendarScreen({ navigation }) {
     if (st === 'OVERTIME') return '#10C300';
     if (st === 'LEAVE') return '#8C2DFF';
     if (st === 'HALF_DAY') return '#F3F300';
+    if (st === 'HOLIDAY') return '#6B7280';
+    if (st === 'WEEKLY_OFF') return '#5BC0DE';
     return null;
   };
 
@@ -94,12 +122,16 @@ export default function CalendarScreen({ navigation }) {
     if (!day) return '#F3F4F6';
     const st = String(daysByDate?.[dateKey]?.dayStatus || '');
     if (st === 'ABSENT') return '#CA0000';
+    if (st === 'HOLIDAY') return '#F3F4F6';
+    if (st === 'WEEKLY_OFF') return '#E1F5FE';
     return '#FFFFFF';
   };
 
   const dayTextColor = (dateKey) => {
     const st = String(daysByDate?.[dateKey]?.dayStatus || '');
     if (st === 'ABSENT') return '#FFFFFF';
+    if (st === 'HOLIDAY') return '#6B7280';
+    if (st === 'WEEKLY_OFF') return '#5BC0DE';
     return '#1f2c3a';
   };
 
@@ -135,7 +167,7 @@ export default function CalendarScreen({ navigation }) {
           {week.map((d) => (
             <Text key={d} style={styles.weekCell}>{d}</Text>
           ))}
-        </View>   
+        </View>
 
         {loading ? (
           <View style={{ paddingVertical: 10 }}><ActivityIndicator /></View>
@@ -169,6 +201,9 @@ export default function CalendarScreen({ navigation }) {
           <View style={styles.detailCard}>
             <Text style={styles.detailTitle}>{selected.date}</Text>
             <Text style={styles.detailSub}>Status: {String(selected.dayStatus || 'NA')}</Text>
+            {selected.reason ? (
+              <Text style={[styles.detailSub, { color: '#CA0000', fontWeight: '600' }]}>Reason: {selected.reason}</Text>
+            ) : null}
             {selected.dayStatus === 'LEAVE' && selected.leaveType ? (
               <Text style={styles.detailSub}>Leave Type: {String(selected.leaveType)}</Text>
             ) : null}
@@ -176,12 +211,15 @@ export default function CalendarScreen({ navigation }) {
         ) : null}
 
         {/* Legend */}
-        <View style={styles.legend}>
+        <View style={[styles.legend, { flexWrap: 'wrap' }]}>
           <LegendItem color="#10C300" label="Present" />
           <LegendItem color="#D90000" label="Absent" />
           <LegendItem color="#8C2DFF" label="On leave" />
           <LegendItem color="#F3F300" label="Half day" />
-          <LegendItem color="#DEDEDE" label="Holiday" />
+          <LegendItem color="#6B7280" label="Holiday" />
+        </View>
+        <View style={[styles.legend, { marginTop: 8 }]}>
+          <LegendItem color="#5BC0DE" label="Weekly Off" />
         </View>
       </View>
 
@@ -214,14 +252,15 @@ const styles = StyleSheet.create({
   container: { padding: 16 },
   monthRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   chevBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 8, backgroundColor: 'transparent' },
-  monthLabel: { fontFamily: 'Inter_400Regular', color: '#616161',fontSize:18 },
+  monthLabel: { fontFamily: 'Inter_400Regular', color: '#616161', fontSize: 18 },
 
-  weekRow: { flexDirection: 'row', marginBottom: 10,marginTop:22 },
+  weekRow: { flexDirection: 'row', marginBottom: 10, marginTop: 22 },
   weekCell: { flex: 1, textAlign: 'center', color: '#6B7280', fontFamily: 'Inter_400Regular', fontSize: 12 },
 
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap' },
   cell: {
-    width: '14.5%', // approximate 7 cols with gap accounted by flex wrap gap
+    flexBasis: '14.2857%',
+    maxWidth: '14.2857%',
     aspectRatio: 1,
     borderRadius: 8,
     position: 'relative',
@@ -229,7 +268,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#E6EEFF',
-    height:40
+    marginVertical: 4
   },
   cellActive: { borderColor: '#125EC9', borderWidth: 2 },
   dayText: { color: '#1f2c3a', fontFamily: 'Inter_500Medium', fontSize: 12 },

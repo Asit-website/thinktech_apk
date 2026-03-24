@@ -113,6 +113,7 @@ export default function SalaryScreen({ navigation }) {
   const [computedMonth, setComputedMonth] = useState(null);
   const [salaryCalcMode, setSalaryCalcMode] = useState('calendar');
   const [allowSalaryReport, setAllowSalaryReport] = useState(false);
+  const [hasSalaryAccess, setHasSalaryAccess] = useState(null);
   const [rawSalaryJson, setRawSalaryJson] = useState(null);
   const [user, setUser] = useState(null);
 
@@ -121,12 +122,21 @@ export default function SalaryScreen({ navigation }) {
     const fetchSalaryData = async () => {
       try {
         setSalaryCalcMode('calendar');
+        let canViewSalary = true;
         try {
           const access = await api.get('/me/salary/access');
-          setAllowSalaryReport(!!access?.data?.allowCurrentCycle);
+          canViewSalary = !!access?.data?.allowCurrentCycle;
         } catch (_) {
-          setAllowSalaryReport(false);
+          canViewSalary = true;
         }
+        setAllowSalaryReport(canViewSalary);
+        setHasSalaryAccess(canViewSalary);
+
+        if (!canViewSalary) {
+          setSalaryData(null);
+          return;
+        }
+
         const userResponse = await getMe();
         if (userResponse.success && userResponse.user) {
           const userData = userResponse.user;
@@ -144,6 +154,7 @@ export default function SalaryScreen({ navigation }) {
         }
       } catch (error) {
         console.error('Error fetching salary data:', error);
+        setHasSalaryAccess(true);
       } finally {
         setIsLoading(false);
       }
@@ -217,9 +228,33 @@ export default function SalaryScreen({ navigation }) {
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
   ];
+  const staffStartMonth = React.useMemo(() => {
+    const candidates = [
+      user?.profile?.dateOfJoining,
+      user?.createdAt,
+      user?.profile?.createdAt,
+    ].filter(Boolean);
+    for (const c of candidates) {
+      const d = new Date(c);
+      if (!Number.isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), 1);
+    }
+    return null;
+  }, [user]);
+
+  const currentMonthStart = React.useMemo(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  }, []);
+
   const today = new Date();
   const [monthIdx, setMonthIdx] = React.useState(today.getMonth());
   const [year, setYear] = React.useState(today.getFullYear());
+  const selectedMonthStart = React.useMemo(() => new Date(year, monthIdx, 1), [year, monthIdx]);
+  const canGoPrevMonth = React.useMemo(() => {
+    if (!staffStartMonth) return true;
+    return selectedMonthStart > staffStartMonth;
+  }, [selectedMonthStart, staffStartMonth]);
+  const canGoNextMonth = React.useMemo(() => selectedMonthStart < currentMonthStart, [selectedMonthStart, currentMonthStart]);
 
   // Month computation: always try backend /me/salary-compute first (actual PayrollLine data),
   // only fall back to local monthStore if no payroll line exists for that month.
@@ -296,9 +331,11 @@ export default function SalaryScreen({ navigation }) {
               weeklyOffDays: Number(s.weeklyOff || 0),
               holidays: Number(s.holidays || 0),
               unpaidDays: Number(s.unpaidLeave || 0),
+              lateCount: Number(s.lateCount || 0),
+              latePenaltyDays: Number(s.latePenaltyDays || 0),
             },
             attendanceInfo: {
-              payableDays: Number(s.present || 0) + Number(s.half || 0) * 0.5 + Number(s.weeklyOff || 0) + Number(s.holidays || 0) + Number(s.paidLeave || 0),
+              payableDays: (Number(s.present || 0) + Number(s.half || 0) * 0.5 + Number(s.weeklyOff || 0) + Number(s.holidays || 0) + Number(s.paidLeave || 0)) - Number(s.latePenaltyDays || 0),
               totalWorkingDays: daysInMonth,
               attendancePercentage: ((Number(s.present || 0) + Number(s.half || 0) * 0.5) / Math.max(1, daysInMonth)) * 100,
             },
@@ -350,6 +387,7 @@ export default function SalaryScreen({ navigation }) {
   }
 
   const prevMonth = () => {
+    if (!canGoPrevMonth) return;
     setMonthIdx((idx) => {
       if (idx === 0) { setYear((y) => y - 1); return 11; }
       return idx - 1;
@@ -357,6 +395,7 @@ export default function SalaryScreen({ navigation }) {
   };
 
   const nextMonth = () => {
+    if (!canGoNextMonth) return;
     setMonthIdx((idx) => {
       if (idx === 11) { setYear((y) => y + 1); return 0; }
       return idx + 1;
@@ -398,10 +437,19 @@ export default function SalaryScreen({ navigation }) {
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-        {isLoading || !salaryData ? (
+        {isLoading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#125EC9" />
             <Text style={styles.loadingText}>Loading salary details...</Text>
+          </View>
+        ) : hasSalaryAccess === false ? (
+          <View style={styles.noAccessCard}>
+            <Text style={styles.noAccessTitle}>Access Restricted</Text>
+            <Text style={styles.noAccessText}>You don't have access to salary.</Text>
+          </View>
+        ) : !salaryData ? (
+          <View style={styles.loadingContainer}>
+            <Text style={styles.loadingText}>Salary data not available.</Text>
           </View>
         ) : (
           <>
@@ -477,15 +525,21 @@ export default function SalaryScreen({ navigation }) {
             {/* Month section with accordions (detail) */}
             <View style={styles.monthSection}>
               <View style={styles.monthHeader}>
-                <TouchableOpacity onPress={() => {
-                  if (monthIdx === 0) { setYear((y) => y - 1); setMonthIdx(11); } else setMonthIdx(monthIdx - 1);
-                }} style={styles.monthArrow} activeOpacity={0.7}>
+                <TouchableOpacity
+                  onPress={prevMonth}
+                  style={[styles.monthArrow, !canGoPrevMonth ? styles.monthArrowDisabled : null]}
+                  activeOpacity={0.7}
+                  disabled={!canGoPrevMonth}
+                >
                   <Image source={require('../assets/leftie.png')} style={{ width: 12, height: 12 }} />
                 </TouchableOpacity>
                 <Text style={styles.monthTitle}>{monthNames[monthIdx]} {year}</Text>
-                <TouchableOpacity onPress={() => {
-                  if (monthIdx === 11) { setYear((y) => y + 1); setMonthIdx(0); } else setMonthIdx(monthIdx + 1);
-                }} style={styles.monthArrow} activeOpacity={0.7}>
+                <TouchableOpacity
+                  onPress={nextMonth}
+                  style={[styles.monthArrow, !canGoNextMonth ? styles.monthArrowDisabled : null]}
+                  activeOpacity={0.7}
+                  disabled={!canGoNextMonth}
+                >
                   <Image source={require('../assets/rightie.png')} style={{ width: 12, height: 12 }} />
                 </TouchableOpacity>
               </View>
@@ -500,8 +554,9 @@ export default function SalaryScreen({ navigation }) {
                     <Row label="Weekly Off Days" amount={(monthSpecificData.attendanceData?.weeklyOffDays || 0).toString()} />
                     <Row label="Holidays" amount={(monthSpecificData.attendanceData?.holidays || 0).toString()} />
                     <Row label="Absent Days" amount={(monthSpecificData.attendanceData?.absentDays || 0).toString()} />
+                    <Row label="Late Count" amount={(monthSpecificData.attendanceData?.lateCount || 0).toString()} />
+                    <Row label="Late Penalty (Days)" amount={(monthSpecificData.attendanceData?.latePenaltyDays || 0).toString()} />
                     <Row label="Payable Days" amount={monthSpecificData.attendanceInfo?.payableDays?.toString?.() || '--'} />
-                    {/* <Row label="Attendance %" amount={`${(monthSpecificData.attendanceInfo?.attendancePercentage || 0).toFixed(1)}%`} /> */}
                   </>
                 ) : (
                   <Row label="Status" amount={monthSpecificData?.isFutureMonth ? 'Future month - Attendance not yet recorded' : 'Current/past month'} />
@@ -633,6 +688,17 @@ const styles = StyleSheet.create({
   content: { padding: 16 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 50 },
   loadingText: { marginTop: 12, fontSize: 16, color: '#666' },
+  noAccessCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  noAccessTitle: { fontSize: 16, fontWeight: '700', color: '#991B1B', marginBottom: 8 },
+  noAccessText: { fontSize: 14, color: '#7F1D1D' },
 
   summaryCard: { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E6EEFF', marginBottom: 16 },
   dateHeader: { backgroundColor: '#125EC9', borderTopLeftRadius: 12, borderTopRightRadius: 12 },
@@ -657,6 +723,7 @@ const styles = StyleSheet.create({
   monthSection: { marginTop: 10 },
   monthHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   monthArrow: { padding: 8, backgroundColor: '#F3F4F6', borderRadius: 6 },
+  monthArrowDisabled: { opacity: 0.45 },
   monthTitle: { fontSize: 14, fontWeight: '700', color: '#374151' },
 
   accordion: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#E6EEFF', borderRadius: 12, marginBottom: 12 },

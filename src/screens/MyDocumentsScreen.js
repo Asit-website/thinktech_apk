@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIndicator, Platform, Linking } from 'react-native';
+import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIndicator, Platform, Linking, Alert } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { listRequiredDocuments, uploadStaffDocument } from '../config/api';
 import { notifyError, notifyInfo, notifySuccess } from '../utils/notify';
@@ -51,7 +51,7 @@ export default function MyDocumentsScreen({ navigation }) {
     load();
   }, []);
 
-  const pickFile = async () => {
+  const pickFileFromDevice = async () => {
     try {
       const res = await DocumentPicker.getDocumentAsync({
         type: ['application/pdf', 'image/*'],
@@ -74,6 +74,52 @@ export default function MyDocumentsScreen({ navigation }) {
     }
   };
 
+  const pickFileFromCamera = async () => {
+    try {
+      const ImagePicker = await import('expo-image-picker');
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        notifyInfo('Camera permission is required to capture document photo.');
+        return null;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: false,
+        quality: 0.8,
+      });
+      if (result.canceled) return null;
+      const asset = result.assets?.[0];
+      if (!asset?.uri) return null;
+
+      return {
+        uri: asset.uri,
+        name: asset.fileName || 'document.jpg',
+        type: asset.mimeType || 'image/jpeg',
+      };
+    } catch (_) {
+      notifyError('Unable to open camera.');
+      return null;
+    }
+  };
+
+  const selectFileForUpload = () => new Promise((resolve) => {
+    if (Platform.OS !== 'android') {
+      pickFileFromDevice().then(resolve);
+      return;
+    }
+
+    Alert.alert(
+      'Upload Document',
+      'Choose source',
+      [
+        { text: 'Camera', onPress: async () => resolve(await pickFileFromCamera()) },
+        { text: 'Choose File', onPress: async () => resolve(await pickFileFromDevice()) },
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(null) }
+    );
+  });
+
   const statusLabel = useMemo(() => {
     const map = {
       SUBMITTED: 'Submitted',
@@ -84,7 +130,7 @@ export default function MyDocumentsScreen({ navigation }) {
   }, []);
 
   const onUpload = async (docTypeId) => {
-    const file = await pickFile();
+    const file = await selectFileForUpload();
     if (!file?.uri) return;
 
     setUploadingId(String(docTypeId));
@@ -131,6 +177,7 @@ export default function MyDocumentsScreen({ navigation }) {
 
         {items.map((it) => {
           const busy = uploadingId === String(it.id);
+          const isApproved = String(it.status || '').toUpperCase() === 'APPROVED';
           const sub = it.uploaded ? statusLabel(it.status) : 'Not uploaded';
           const required = it.required ? 'Required' : 'Optional';
           const fileUrl = buildFileUrl(it.fileUrl);
@@ -142,8 +189,19 @@ export default function MyDocumentsScreen({ navigation }) {
                   <Text style={styles.title}>{it.name}</Text>
                   <Text style={styles.sub}>{required} • {sub}</Text>
                 </View>
-                <TouchableOpacity style={styles.btn} activeOpacity={0.9} onPress={() => onUpload(it.id)} disabled={busy}>
-                  {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>{it.uploaded ? 'Replace' : 'Upload'}</Text>}
+                <TouchableOpacity
+                  style={[styles.btn, isApproved ? styles.btnDisabled : null]}
+                  activeOpacity={0.9}
+                  onPress={() => onUpload(it.id)}
+                  disabled={busy || isApproved}
+                >
+                  {busy ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.btnText}>
+                      {isApproved ? 'Approved' : (it.uploaded ? 'Replace' : 'Upload')}
+                    </Text>
+                  )}
                 </TouchableOpacity>
               </View>
 
@@ -202,6 +260,7 @@ const styles = StyleSheet.create({
   sub: { marginTop: 4, color: '#6B7280', fontFamily: 'Inter_400Regular', fontSize: 12 },
 
   btn: { backgroundColor: '#125EC9', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, minWidth: 90, alignItems: 'center' },
+  btnDisabled: { backgroundColor: '#9CA3AF' },
   btnText: { color: '#fff', fontFamily: 'Inter_600SemiBold' },
 
   previewRow: { flexDirection: 'row', gap: 12, marginTop: 12, alignItems: 'center' },
