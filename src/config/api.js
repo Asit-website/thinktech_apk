@@ -799,6 +799,11 @@ export async function createActivity(data) {
   return resp.data;
 }
 
+export async function getSubscriptionInfo() {
+  const resp = await api.get('/subscription/subscription-info');
+  return resp.data;
+}
+
 export async function updateActivity(id, data) {
   const resp = await api.patch(`/activities/${id}`, data);
   return resp.data;

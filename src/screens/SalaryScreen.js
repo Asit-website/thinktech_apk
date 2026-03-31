@@ -5,101 +5,99 @@ import BottomNav from '../components/BottomNav';
 import api, { listMyLeaveRequests, getMe, getAttendanceHistory, getMyWeeklyOffDates } from '../config/api';
 
 // Parse and normalize salary values into a uniform structure with totals
+// Parse and normalize salary values into a uniform structure with totals
 function extractSalaryValues(user) {
-  // salaryValues may be double-encoded like "\"{\\\"earnings\\\":{...}}\""
   const parseMaybe = (v) => {
     if (!v) return v;
     if (typeof v !== 'string') return v;
-    try { v = JSON.parse(v); } catch { return v; }   // first pass
+    try { v = JSON.parse(v); } catch { return v; }
     if (typeof v === 'string') {
-      try { v = JSON.parse(v); } catch { /* keep as string */ }
+      try { v = JSON.parse(v); } catch { }
     }
     return v;
   };
 
+  const norm = (s = '') => s.toLowerCase().replace(/[_\s]/g, '');
+
+  let tpl = user?.salaryTemplate;
+  let tplEarnKeys = null;
+  let tplDedKeys = null;
+  if (tpl) {
+    try {
+      const e = parseMaybe(tpl.earnings) || [];
+      const d = parseMaybe(tpl.deductions) || [];
+      tplEarnKeys = e.map(it => it.name || it.key).filter(Boolean).filter(k => !norm(k).includes('employer'));
+      tplDedKeys = d.map(it => it.name || it.key).filter(Boolean).filter(k => !norm(k).includes('employer'));
+    } catch(e){}
+  }
+
   let sv = parseMaybe(user?.salaryValues || user?.salary_values || user?.salaryDetails || user?.salary_details || null);
 
-  // If we now have proper template JSON (base)
+  const prefEarn = ['basic_salary', 'hra', 'da', 'special_allowance', 'conveyance_allowance', 'medical_allowance', 'telephone_allowance', 'other_allowances'];
+  const prefDed = ['provident_fund', 'esi', 'professional_tax', 'income_tax', 'loan_deduction', 'other_deductions'];
+
+  let earnings = {};
+  let deductions = {};
+  let incentives = {};
+
   if (sv && typeof sv === 'object' && (sv.earnings || sv.deductions || sv.incentives)) {
-    const earnings = (sv.earnings && typeof sv.earnings === 'object') ? sv.earnings : {};
-    const deductions = (sv.deductions && typeof sv.deductions === 'object') ? sv.deductions : {};
-    const incentives = (sv.incentives && typeof sv.incentives === 'object') ? sv.incentives : {};
-    const sum = (o) => Object.values(o || {}).reduce((s, v) => s + (Number(v) || 0), 0);
-    const totalEarnings = sum(earnings);
-    const totalIncentives = sum(incentives);
-    const totalDeductions = sum(deductions);
-    const grossSalary = totalEarnings + totalIncentives;
-    const netSalary = grossSalary - totalDeductions;
-    return {
-      earnings, deductions, incentives,
-      totalEarnings, totalIncentives, totalDeductions,
-      grossSalary, netSalary,
-      templateFields: { earnings, incentives, deductions },
-      basicSalary: Number(earnings.basic_salary || earnings.basicSalary || 0),
-      hra: Number(earnings.hra || 0),
+    earnings = (sv.earnings && typeof sv.earnings === 'object') ? sv.earnings : {};
+    deductions = (sv.deductions && typeof sv.deductions === 'object') ? sv.deductions : {};
+    incentives = (sv.incentives && typeof sv.incentives === 'object') ? sv.incentives : {};
+  } else {
+    let sd = (user?.salaryDetails || user?.salary_details || {});
+    earnings = {
+      basic_salary: Number(sd.basicSalary || 0),
+      hra: Number(sd.hra || 0),
+      da: Number(sd.da || 0),
+      special_allowance: Number(sd.specialAllowance || 0),
+      conveyance_allowance: Number(sd.conveyanceAllowance || 0),
+      medical_allowance: Number(sd.medicalAllowance || 0),
+      telephone_allowance: Number(sd.telephoneAllowance || 0),
+      other_allowances: Number(sd.otherAllowances || 0),
+      hospitality_allowance: Number(sd.hospitalityAllowance || sd.hospitilityAllowance || 0),
+    };
+    deductions = {
+      provident_fund: Number(sd.pfDeduction || 0),
+      esi: Number(sd.esiDeduction || 0),
+      professional_tax: Number(sd.professionalTax || 0),
+      tds: Number(sd.tdsDeduction || 0),
+      other_deductions: Number(sd.otherDeductions || 0),
     };
   }
 
-  // Flat salaryDetails fallback
-  // IMPORTANT: prefer user.salaryDetails (camel/snake). Do NOT treat a months-only sv as salaryDetails.
-  let sd = (user?.salaryDetails || user?.salary_details || {});
-
-  // If no salaryDetails and we have months, derive a display baseline from the most recent month
-  if ((!sd || Object.keys(sd).length === 0) && sv && typeof sv === 'object' && sv.months && Object.keys(sv.months).length > 0) {
-    const keys = Object.keys(sv.months).filter(k => /^\d{4}-\d{2}$/.test(k)).sort();
-    const lastKey = keys[keys.length - 1];
-    const mm = sv.months[lastKey] || {};
-    const e = (mm.earnings && typeof mm.earnings === 'object') ? mm.earnings : {};
-    const d = (mm.deductions && typeof mm.deductions === 'object') ? mm.deductions : {};
-    sd = {
-      basicSalary: e.basic_salary || e.basicSalary || 0,
-      hra: e.hra || 0,
-      da: e.da || 0,
-      specialAllowance: e.special_allowance || 0,
-      conveyanceAllowance: e.conveyance_allowance || 0,
-      medicalAllowance: e.medical_allowance || 0,
-      telephoneAllowance: e.telephone_allowance || 0,
-      otherAllowances: e.other_allowances || 0,
-      hospitalityAllowance: e.hospitality_allowance || 0,
-      pfDeduction: d.provident_fund || 0,
-      esiDeduction: d.esi || 0,
-      professionalTax: d.professional_tax || 0,
-      tdsDeduction: d.tds || 0,
-      otherDeductions: d.other_deductions || 0,
-    };
-  }
-
-  const earnings = {
-    basic_salary: Number(sd.basicSalary || 0),
-    hra: Number(sd.hra || 0),
-    da: Number(sd.da || 0),
-    special_allowance: Number(sd.specialAllowance || 0),
-    conveyance_allowance: Number(sd.conveyanceAllowance || 0),
-    medical_allowance: Number(sd.medicalAllowance || 0),
-    telephone_allowance: Number(sd.telephoneAllowance || 0),
-    other_allowances: Number(sd.otherAllowances || 0),
-    hospitality_allowance: Number(sd.hospitalityAllowance || sd.hospitilityAllowance || 0),
+  const filterFields = (obj, pref, tplKeys) => {
+    const res = {};
+    const norm = (s = '') => s.toLowerCase().replace(/[_\s]/g, '');
+    Object.entries(obj).forEach(([k, v]) => {
+      const nk = norm(k);
+      const inTpl = tplKeys ? tplKeys.some(tk => norm(tk) === nk) : false;
+      const inPref = !tplKeys && pref.includes(k);
+      
+      // CRITICAL FIX: Only show if non-zero OR it's explicitly in the template
+      if (Number(v) !== 0 || inTpl) {
+        res[k] = v;
+      }
+    });
+    return res;
   };
-  const deductions = {
-    provident_fund: Number(sd.pfDeduction || 0),
-    esi: Number(sd.esiDeduction || 0),
-    professional_tax: Number(sd.professionalTax || 0),
-    tds: Number(sd.tdsDeduction || 0),
-    other_deductions: Number(sd.otherDeductions || 0),
-  };
+
+  const filteredEarnings = filterFields(earnings, prefEarn, tplEarnKeys);
+  const filteredDeductions = filterFields(deductions, prefDed, tplDedKeys);
+
   const sum = (o) => Object.values(o || {}).reduce((s, v) => s + (Number(v) || 0), 0);
-  // IMPORTANT: compute from components to match Admin (ignore sd totals)
-  const totalEarnings = sum(earnings);
-  const totalDeductions = sum(deductions);
-  const grossSalary = totalEarnings; // no incentives in this base path
+  const totalEarnings = sum(filteredEarnings);
+  const totalIncentives = sum(incentives);
+  const totalDeductions = sum(filteredDeductions);
+  const grossSalary = totalEarnings + totalIncentives;
   const netSalary = grossSalary - totalDeductions;
+
   return {
-    earnings, deductions, incentives: {},
-    totalEarnings, totalIncentives: 0, totalDeductions,
+    earnings: filteredEarnings, deductions: filteredDeductions, incentives,
+    totalEarnings, totalIncentives, totalDeductions,
     grossSalary, netSalary,
-    templateFields: { earnings, incentives: {}, deductions },
-    basicSalary: Number(sd.basicSalary || 0),
-    hra: Number(sd.hra || 0),
+    tplEarnKeys, tplDedKeys,
+    basicSalary: Number(earnings.basic_salary || earnings.basicSalary || 0),
   };
 }
 
@@ -273,16 +271,8 @@ export default function SalaryScreen({ navigation }) {
           const t = comp.data.totals || {};
           const s = comp.data.attendanceSummary || {};
 
-          // Check payment status
-          let paymentStatus = 'DUE';
-          let paidAmount = 0;
-          try {
-            const payrollRes = await api.get('/me/payroll-status', { params: { monthKey: ym } });
-            if (payrollRes.data?.success) {
-              paymentStatus = payrollRes.data.paymentStatus;
-              paidAmount = payrollRes.data.paidAmount || 0;
-            }
-          } catch (_) { }
+          const paymentStatus = comp.data.paymentStatus || 'DUE';
+          const paidAmount = comp.data.paidAmount || 0;
 
           const e = comp.data.earnings || {};
           const d = comp.data.deductions || {};
@@ -295,19 +285,24 @@ export default function SalaryScreen({ navigation }) {
           const grossSalary = Number(t.grossSalary ?? (totalEarnings + totalIncentives));
           const netSalary = Number(t.netSalary ?? (grossSalary - totalDeductions));
 
-          // Build templateFields from the keys in the response
-          const templateFields = {
-            earnings: Object.keys(e).reduce((o, k) => { o[k] = {}; return o; }, {}),
-            incentives: Object.keys(i).reduce((o, k) => { o[k] = {}; return o; }, {}),
-            deductions: Object.keys(d).reduce((o, k) => { o[k] = {}; return o; }, {}),
+          // Build tplEarnKeys ONLY if no template keys exist in salaryData
+          const finalTplEarnKeys = salaryData?.tplEarnKeys || Object.keys(e);
+          const finalTplDedKeys = salaryData?.tplDedKeys || Object.keys(d);
+
+          // Apply filtering to the backend response as well
+          const norm = (s = '') => s.toLowerCase().replace(/[_\s]/g, '');
+          const filter = (obj, keys) => {
+            const r = {};
+            Object.entries(obj).forEach(([k, v]) => {
+              if (Number(v) !== 0 || (keys && keys.some(tk => norm(tk) === norm(k)))) {
+                r[k] = v;
+              }
+            });
+            return r;
           };
-          // If no keys in response, fall back to salaryData templateFields
-          if (Object.keys(templateFields.earnings).length === 0) {
-            templateFields.earnings = salaryData.templateFields?.earnings || {};
-          }
-          if (Object.keys(templateFields.deductions).length === 0) {
-            templateFields.deductions = salaryData.templateFields?.deductions || {};
-          }
+
+          const filteredE = filter(e, finalTplEarnKeys);
+          const filteredD = filter(d, finalTplDedKeys);
 
           setComputedMonth({
             netSalary,
@@ -315,9 +310,11 @@ export default function SalaryScreen({ navigation }) {
             totalIncentives,
             totalDeductions,
             grossSalary,
-            templateFields,
-            earnings: e,
-            deductions: d,
+            tplEarnKeys: finalTplEarnKeys,
+            tplDedKeys: finalTplDedKeys,
+            tplIncentiveKeys: Object.keys(i),
+            earnings: filteredE,
+            deductions: filteredD,
             incentives: i,
             basicSalary: Number(e.basic_salary || e.basicSalary || 0),
             paymentStatus,
@@ -379,8 +376,12 @@ export default function SalaryScreen({ navigation }) {
     run();
   }, [monthIdx, year, isLoading, salaryData, salaryCalcMode, rawSalaryJson]);
 
-  function getFieldLabel(field, templateConfig = null) {
-    if (templateConfig && templateConfig.label) return templateConfig.label;
+  function getFieldLabel(field, tplKeys = null) {
+    const norm = (s = '') => s.toLowerCase().replace(/[_\s]/g, '');
+    const nk = norm(field);
+    const match = tplKeys ? tplKeys.find(tk => norm(tk) === nk) : null;
+    if (match) return match;
+
     const known = { pf: 'Provident Fund', pf_deduction: 'Provident Fund', esi_deduction: 'ESI', tds_deduction: 'TDS' };
     if (known[field]) return known[field];
     return String(field).split('_').filter(Boolean).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
@@ -564,13 +565,13 @@ export default function SalaryScreen({ navigation }) {
               </Accordion>
 
               <Accordion title="Earnings">
-                {monthSpecificData?.templateFields?.earnings ? (
-                  Object.keys(monthSpecificData.templateFields.earnings).map(field => {
+                {monthSpecificData?.earnings ? (
+                  Object.keys(monthSpecificData.earnings).map(field => {
                     const amt = Number(monthSpecificData.earnings?.[field] || 0);
                     return (
                       <Row
                         key={field}
-                        label={getFieldLabel(field, monthSpecificData.templateFields.earnings[field])}
+                        label={getFieldLabel(field, monthSpecificData.tplEarnKeys)}
                         amount={formatCurrency(amt)}
                       />
                     );
@@ -583,13 +584,13 @@ export default function SalaryScreen({ navigation }) {
               </Accordion>
 
               <Accordion title="Deductions">
-                {monthSpecificData?.templateFields?.deductions ? (
-                  Object.keys(monthSpecificData.templateFields.deductions).map(field => {
+                {monthSpecificData?.deductions ? (
+                  Object.keys(monthSpecificData.deductions).map(field => {
                     const amt = Number(monthSpecificData.deductions?.[field] || 0);
                     return (
                       <Row
                         key={field}
-                        label={getFieldLabel(field, monthSpecificData.templateFields.deductions[field])}
+                        label={getFieldLabel(field, monthSpecificData.tplDedKeys)}
                         amount={formatCurrency(amt)}
                       />
                     );

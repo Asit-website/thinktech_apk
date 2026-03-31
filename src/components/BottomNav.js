@@ -3,22 +3,29 @@ import { View, TouchableOpacity, Image, Text, StyleSheet } from 'react-native';
 import { usePermissions } from '../contexts/PermissionsContext';
 
 export default function BottomNav({ navigation, activeKey = 'home', items }) {
-  const { hasPermission } = usePermissions();
+  const { hasPermission, subscriptionInfo } = usePermissions();
   const showSales = hasPermission('sales_access');
 
   const defaultTabs = [
     { key: 'home', label: 'Home', icon: require('../assets/tab1.png'), route: 'Home' },
-    { key: 'sales', label: 'Sales', icon: require('../assets/tab2.png'), route: 'Sales' },
+    { key: 'sales', label: 'Sales', icon: require('../assets/tab2.png'), route: 'Sales', featureFlag: 'salesEnabled' },
     { key: 'Attendance', label: 'Attendance', icon: require('../assets/tab3.png'), route: 'Attendance' },
-    { key: 'Salary', label: 'Salary', icon: require('../assets/tab4.png'), route: 'Salary' },
+    { key: 'Salary', label: 'Salary', icon: require('../assets/tab4.png'), route: 'Salary', featureFlag: 'payrollEnabled' },
     { key: 'Profile', label: 'Profile', icon: require('../assets/person-circle.png'), route: 'Profile' },
   ];
 
-  // Filter tabs based on permissions
+  // Filter tabs based on permissions AND subscription info
   const tabs = items || defaultTabs.filter(tab => {
-    if (tab.key === 'sales') {
-      return showSales;
+    // 1. Check Permissions
+    if (tab.key === 'sales' && !showSales) {
+      return false;
     }
+
+    // 2. Check Subscription Feature Flags
+    if (tab.featureFlag && subscriptionInfo && subscriptionInfo[tab.featureFlag] === false) {
+      return false;
+    }
+
     return true;
   });
 

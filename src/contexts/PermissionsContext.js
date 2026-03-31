@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getMyPermissions } from '../config/api';
+import { getMyPermissions, getSubscriptionInfo } from '../config/api';
 
 const PermissionsContext = createContext();
 
@@ -14,26 +14,36 @@ export const usePermissions = () => {
 
 export const PermissionsProvider = ({ children }) => {
   const [permissions, setPermissions] = useState([]);
+  const [subscriptionInfo, setSubscriptionInfo] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const loadPermissions = async () => {
+  const loadData = async () => {
     try {
       setLoading(true);
       const token = await AsyncStorage.getItem('auth_token');
       if (!token) {
         setPermissions([]);
+        setSubscriptionInfo(null);
         setLoading(false);
         return;
       }
 
-      const response = await getMyPermissions();
-      if (response.success && response.permissions) {
-        setPermissions(response.permissions);
+      const [permRes, subRes] = await Promise.all([
+        getMyPermissions(),
+        getSubscriptionInfo()
+      ]);
+
+      if (permRes.success && permRes.permissions) {
+        setPermissions(permRes.permissions);
       } else {
         setPermissions([]);
       }
+
+      if (subRes.success) {
+        setSubscriptionInfo(subRes.subscriptionInfo);
+      }
     } catch (error) {
-      console.error('Error loading permissions:', error);
+      console.error('Error loading app data:', error);
       setPermissions([]);
     } finally {
       setLoading(false);
@@ -41,22 +51,24 @@ export const PermissionsProvider = ({ children }) => {
   };
 
   useEffect(() => {
-    loadPermissions();
+    loadData();
   }, []);
 
   const hasPermission = (permissionName) => {
     return permissions.some(permission => permission.name === permissionName);
   };
 
-  const refreshPermissions = () => {
-    loadPermissions();
+  const refreshData = () => {
+    loadData();
   };
 
   const value = {
     permissions,
+    subscriptionInfo,
     loading,
     hasPermission,
-    refreshPermissions,
+    refreshPermissions: refreshData,
+    refreshData,
   };
 
   return (

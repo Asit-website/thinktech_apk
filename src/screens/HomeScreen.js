@@ -1,11 +1,32 @@
-import React from 'react';
-import { SafeAreaView, View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import React, { useCallback } from 'react';
+import { SafeAreaView, View, Text, TouchableOpacity, StyleSheet, Image, Alert, Platform } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { usePermissions } from '../contexts/PermissionsContext';
 
 export default function HomeScreen({ navigation }) {
-  const { hasPermission, loading } = usePermissions();
+  const { hasPermission, subscriptionInfo, refreshData, loading: permissionLoading } = usePermissions();
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshData();
+    }, [])
+  );
 
   const showSales = hasPermission('sales_access');
+
+  const handlePress = (moduleName, target, isEnabled) => {
+    // If explicit false, don't allow navigation (though button should be hidden anyway)
+    if (isEnabled === false) {
+      const msg = `You do not have access to the ${moduleName} module. Please contact your administrator.`;
+      if (Platform.OS === 'web') {
+        alert(msg);
+      } else {
+        Alert.alert('No Access', msg);
+      }
+      return;
+    }
+    navigation.navigate(target);
+  };
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -13,11 +34,13 @@ export default function HomeScreen({ navigation }) {
         <Text style={styles.heading}>Please choose your preference</Text>
 
         <View style={styles.menu}>
-          <MenuItem
-            title="AI Assistant"
-            LeftIcon={<Image source={require('../assets/uki.png')} style={{ width: 22, height: 22, tintColor: '#125EC9' }} />}
-            onPress={() => navigation.navigate('AIChat')}
-          />
+          {subscriptionInfo?.aiAssistantEnabled !== false && (
+            <MenuItem
+              title="AI Assistant"
+              LeftIcon={<Image source={require('../assets/uki.png')} style={{ width: 22, height: 22, tintColor: '#125EC9' }} />}
+              onPress={() => handlePress('AI Assistant', 'AIChat', subscriptionInfo?.aiAssistantEnabled)}
+            />
+          )}
 
           <MenuItem
             title="Attendance"
@@ -25,31 +48,45 @@ export default function HomeScreen({ navigation }) {
             onPress={() => navigation.navigate('Attendance')}
           />
 
-          {showSales && (
+          {showSales && subscriptionInfo?.salesEnabled !== false && (
             <MenuItem
               title="Sales"
               LeftIcon={<Image source={require('../assets/bar-chart-line.png')} style={{ width: 18, height: 18 }} />}
-              onPress={() => navigation.navigate('Sales')}
+              onPress={() => handlePress('Sales', 'Sales', subscriptionInfo?.salesEnabled)}
             />
           )}
 
-          <MenuItem
-            title="Report"
-            LeftIcon={<Image source={require('../assets/journal-check.png')} style={{ width: 18, height: 18 }} />}
-            onPress={() => navigation.navigate('Reports')}
-          />
+          {subscriptionInfo?.aiReportsEnabled !== false && (
+            <MenuItem
+              title="Report"
+              LeftIcon={<Image source={require('../assets/journal-check.png')} style={{ width: 18, height: 18 }} />}
+              onPress={() => handlePress('Report', 'Reports', subscriptionInfo?.aiReportsEnabled)}
+            />
+          )}
 
-          <MenuItem
-            title="Salary"
-            LeftIcon={<Image source={require('../assets/currency-rupee.png')} style={{ width: 18, height: 18 }} />}
-            onPress={() => navigation.navigate('Salary')}
-          />
+          {subscriptionInfo?.payrollEnabled !== false && (
+            <MenuItem
+              title="Salary"
+              LeftIcon={<Image source={require('../assets/currency-rupee.png')} style={{ width: 18, height: 18 }} />}
+              onPress={() => handlePress('Salary', 'Salary', subscriptionInfo?.payrollEnabled)}
+            />
+          )}
 
-          <MenuItem
-            title="My Task"
-            LeftIcon={<Image source={require('../assets/journal-check.png')} style={{ width: 18, height: 18 }} />}
-            onPress={() => navigation.navigate('TodoList')}
-          />
+          {subscriptionInfo?.expenseEnabled !== false && (
+            <MenuItem
+              title="Expense"
+              LeftIcon={<Image source={require('../assets/currency-rupee.png')} style={{ width: 18, height: 18 }} />}
+              onPress={() => handlePress('Expense', 'Expense', subscriptionInfo?.expenseEnabled)}
+            />
+          )}
+
+          {subscriptionInfo?.taskManagementEnabled !== false && (
+            <MenuItem
+              title="My Task"
+              LeftIcon={<Image source={require('../assets/journal-check.png')} style={{ width: 18, height: 18 }} />}
+              onPress={() => handlePress('Task Management', 'TodoList', subscriptionInfo?.taskManagementEnabled)}
+            />
+          )}
         </View>
       </View>
     </SafeAreaView>

@@ -23,6 +23,7 @@ import api, { getMe, getAttendanceHistory } from '../config/api';
 const { width: screenWidth } = Dimensions.get('window');
 
 // Normalize salary data from /me/salary-compute or /me
+// Normalize salary data from /me/salary-compute or /me
 function extractFromUser(user) {
   const parseMaybe = (v) => {
     if (!v) return v;
@@ -34,102 +35,82 @@ function extractFromUser(user) {
     return v;
   };
 
+  const norm = (s = '') => s.toLowerCase().replace(/[_\s]/g, '');
+
+  let tpl = user?.salaryTemplate;
+  let tplEarnKeys = null;
+  let tplDedKeys = null;
+  if (tpl) {
+    try {
+      const e = parseMaybe(tpl.earnings) || [];
+      const d = parseMaybe(tpl.deductions) || [];
+      tplEarnKeys = e.map(it => it.name || it.key).filter(Boolean).filter(k => !norm(k).includes('employer'));
+      tplDedKeys = d.map(it => it.name || it.key).filter(Boolean).filter(k => !norm(k).includes('employer'));
+    } catch(e){}
+  }
+
   let sv = parseMaybe(user?.salaryValues || user?.salary_values || user?.salaryDetails || user?.salary_details || null);
 
+  let earnings = {};
+  let deductions = {};
+  let incentives = {};
+
   if (sv && typeof sv === 'object' && (sv.earnings || sv.deductions || sv.incentives)) {
-    const earnings = (sv.earnings && typeof sv.earnings === 'object') ? sv.earnings : {};
-    const incentives = (sv.incentives && typeof sv.incentives === 'object') ? sv.incentives : {};
-    const deductions = (sv.deductions && typeof sv.deductions === 'object') ? sv.deductions : {};
-    const sum = (o) => Object.values(o || {}).reduce((s, v) => s + (Number(v) || 0), 0);
-    const totalEarnings = sum(earnings);
-    const totalIncentives = sum(incentives);
-    const totalDeductions = sum(deductions);
-    const grossSalary = totalEarnings + totalIncentives;
-    const netSalary = grossSalary - totalDeductions;
-    return { earnings, incentives, deductions, totalEarnings, totalIncentives, totalDeductions, grossSalary, netSalary };
-  }
-
-  let sd = (user?.salaryDetails || user?.salary_details || null);
-
-  if ((!sd || Object.keys(sd).length === 0) && sv && typeof sv === 'object' && sv.months && Object.keys(sv.months).length > 0) {
-    const keys = Object.keys(sv.months).filter(k => /^\d{4}-\d{2}$/.test(k)).sort();
-    const lastKey = keys[keys.length - 1];
-    const mm = sv.months[lastKey] || {};
-    const e = (mm.earnings && typeof mm.earnings === 'object') ? mm.earnings : {};
-    const d = (mm.deductions && typeof mm.deductions === 'object') ? mm.deductions : {};
-    sd = {
-      basicSalary: e.basic_salary || e.basicSalary || 0,
-      hra: e.hra || 0,
-      da: e.da || 0,
-      specialAllowance: e.special_allowance || 0,
-      conveyanceAllowance: e.conveyance_allowance || 0,
-      medicalAllowance: e.medical_allowance || 0,
-      telephoneAllowance: e.telephone_allowance || 0,
-      otherAllowances: e.other_allowances || 0,
-      hospitalityAllowance: e.hospitality_allowance || 0,
-      pfDeduction: d.provident_fund || 0,
-      esiDeduction: d.esi || 0,
-      professionalTax: d.professional_tax || 0,
-      tdsDeduction: d.tds || 0,
-      otherDeductions: d.other_deductions || 0,
+    earnings = (sv.earnings && typeof sv.earnings === 'object') ? sv.earnings : {};
+    deductions = (sv.deductions && typeof sv.deductions === 'object') ? sv.deductions : {};
+    incentives = (sv.incentives && typeof sv.incentives === 'object') ? sv.incentives : {};
+  } else {
+    // extract from flat user object or defaults
+    const pick = (k) => Number(user?.[k]) || 0;
+    earnings = {
+      basic_salary: pick('basic_salary'),
+      hra: pick('hra'),
+      da: pick('da'),
+      special_allowance: pick('special_allowance'),
+      conveyance_allowance: pick('conveyance_allowance'),
+      medical_allowance: pick('medical_allowance'),
+      telephone_allowance: pick('telephone_allowance'),
+      other_allowances: pick('other_allowances'),
+    };
+    deductions = {
+      provident_fund: pick('provident_fund'),
+      esi: pick('esi'),
+      professional_tax: pick('professional_tax'),
+      tds: pick('tds'),
+      other_deductions: pick('other_deductions'),
     };
   }
 
-  if (sd && typeof sd === 'object') {
-    const earnings = {
-      basic_salary: Number(sd.basicSalary || 0),
-      hra: Number(sd.hra || 0),
-      da: Number(sd.da || 0),
-      special_allowance: Number(sd.specialAllowance || 0),
-      conveyance_allowance: Number(sd.conveyanceAllowance || 0),
-      medical_allowance: Number(sd.medicalAllowance || 0),
-      telephone_allowance: Number(sd.telephoneAllowance || 0),
-      other_allowances: Number(sd.otherAllowances || 0),
-      hospitality_allowance: Number(sd.hospitalityAllowance || sd.hospitilityAllowance || 0),
-    };
-    const deductions = {
-      provident_fund: Number(sd.pfDeduction || 0),
-      esi: Number(sd.esiDeduction || 0),
-      professional_tax: Number(sd.professionalTax || 0),
-      tds: Number(sd.tdsDeduction || 0),
-      other_deductions: Number(sd.otherDeductions || 0),
-    };
-    const incentives = {};
-    const sum = (o) => Object.values(o || {}).reduce((s, v) => s + (Number(v) || 0), 0);
-    const totalEarnings = sum(earnings);
-    const totalIncentives = 0;
-    const totalDeductions = sum(deductions);
-    const grossSalary = totalEarnings + totalIncentives;
-    const netSalary = grossSalary - totalDeductions;
-    return { earnings, incentives, deductions, totalEarnings, totalIncentives, totalDeductions, grossSalary, netSalary };
-  }
-
-  const pick = (k) => Number(user?.[k]) || 0;
-  const earnings = {
-    basic_salary: pick('basic_salary'),
-    hra: pick('hra'),
-    da: pick('da'),
-    special_allowance: pick('special_allowance'),
-    conveyance_allowance: pick('conveyance_allowance'),
-    medical_allowance: pick('medical_allowance'),
-    telephone_allowance: pick('telephone_allowance'),
-    other_allowances: pick('other_allowances'),
+  const filterFields = (obj, tplKeys) => {
+    const res = {};
+    Object.entries(obj).forEach(([k, v]) => {
+      const nk = norm(k);
+      const inTpl = tplKeys ? tplKeys.some(tk => norm(tk) === nk) : false;
+      
+      // CRITICAL FIX: Only show if non-zero OR it's explicitly in the template
+      if (Number(v) !== 0 || inTpl) {
+        res[k] = v;
+      }
+    });
+    return res;
   };
-  const deductions = {
-    provident_fund: pick('provident_fund'),
-    esi: pick('esi'),
-    professional_tax: pick('professional_tax'),
-    tds: pick('tds'),
-    other_deductions: pick('other_deductions'),
-  };
-  const incentives = {};
+
+  const filteredEarnings = filterFields(earnings, tplEarnKeys);
+  const filteredDeductions = filterFields(deductions, tplDedKeys);
+
   const sum = (o) => Object.values(o || {}).reduce((s, v) => s + (Number(v) || 0), 0);
-  const totalEarnings = sum(earnings);
-  const totalIncentives = 0;
-  const totalDeductions = sum(deductions);
+  const totalEarnings = sum(filteredEarnings);
+  const totalIncentives = sum(incentives);
+  const totalDeductions = sum(filteredDeductions);
   const grossSalary = totalEarnings + totalIncentives;
   const netSalary = grossSalary - totalDeductions;
-  return { earnings, incentives, deductions, totalEarnings, totalIncentives, totalDeductions, grossSalary, netSalary };
+
+  return {
+    earnings: filteredEarnings, deductions: filteredDeductions, incentives,
+    totalEarnings, totalIncentives, totalDeductions,
+    grossSalary, netSalary,
+    tplEarnKeys, tplDedKeys
+  };
 }
 
 export default function SalaryReportScreen({ navigation }) {
@@ -142,7 +123,9 @@ export default function SalaryReportScreen({ navigation }) {
     deductions: {},
     grossSalary: 0,
     netSalary: 0,
-    finalNetSalary: 0
+    finalNetSalary: 0,
+    paymentStatus: 'DUE',
+    paidAmount: 0
   });
   const [salaryTemplate, setSalaryTemplate] = useState(null);
   const [staffStartMonth, setStaffStartMonth] = useState(null);
@@ -269,10 +252,31 @@ export default function SalaryReportScreen({ navigation }) {
         const grossSalary = Number(t.grossSalary ?? (totalEarnings + totalIncentives));
         const netSalary = Number(t.netSalary ?? (grossSalary - totalDeductions));
 
+        const base = user ? extractFromUser(user) : { earnings: {}, incentives: {}, deductions: {}, grossSalary: 0, netSalary: 0 };
+        
+        // Final template keys from base (respecting the primary template)
+        const finalTplEarnKeys = base.tplEarnKeys || Object.keys(e);
+        const finalTplDedKeys = base.tplDedKeys || Object.keys(d);
+
+        // Apply filtering to backend response
+        const norm = (s = '') => s.toLowerCase().replace(/[_\s]/g, '');
+        const filter = (obj, keys) => {
+          const r = {};
+          Object.entries(obj).forEach(([k, v]) => {
+            if (Number(v) !== 0 || (keys && keys.some(tk => norm(tk) === norm(k)))) {
+              r[k] = v;
+            }
+          });
+          return r;
+        };
+
+        const filteredE = filter(e, finalTplEarnKeys);
+        const filteredD = filter(d, finalTplDedKeys);
+
         setSalaryData({
-          earnings: e,
+          earnings: filteredE,
           incentives: i,
-          deductions: d,
+          deductions: filteredD,
           grossSalary,
           netSalary,
           finalNetSalary: netSalary,
@@ -280,9 +284,13 @@ export default function SalaryReportScreen({ navigation }) {
           totalIncentives,
           totalDeductions,
           attendanceSummary: s,
-          ratio: Number(t.ratio ?? s.ratio ?? 1), // default 1 so values are shown
+          ratio: Number(t.ratio ?? s.ratio ?? 1),
           isGenerated: comp.data.isGenerated === true,
           payslipPath: comp.data.payslipPath,
+          paymentStatus: comp.data.paymentStatus || 'DUE',
+          paidAmount: comp.data.paidAmount || 0,
+          tplEarnKeys: finalTplEarnKeys,
+          tplDedKeys: finalTplDedKeys,
         });
 
         // For past months, only zero if absolutely no payable indicators
@@ -425,21 +433,38 @@ export default function SalaryReportScreen({ navigation }) {
                     </View>
                   </View>
                 </View>
+                <View style={[styles.salaryCard, { backgroundColor: salaryData.paymentStatus === 'PAID' ? '#D1FAE5' : '#DBEAFE' }]}>
+                  <View style={styles.salaryContent}>
+                    <Image 
+                      source={salaryData.paymentStatus === 'PAID' ? require('../assets/vix.png') : require('../assets/clock-fill.png')} 
+                      style={[styles.salaryIcon, { tintColor: salaryData.paymentStatus === 'PAID' ? '#10B981' : '#1D4ED8' }]} 
+                    />
+                    <View>
+                      <Text style={[styles.salaryLabel, { color: salaryData.paymentStatus === 'PAID' ? '#10B981' : '#1D4ED8' }]}>Payment Status</Text>
+                      <Text style={[styles.salaryAmount, { color: salaryData.paymentStatus === 'PAID' ? '#065F46' : '#1E40AF' }]}>
+                        {salaryData.paymentStatus === 'PAID' ? 'PAID' : 'DUE'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
               </View>
             </>
 
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Earnings</Text>
-              {Object.entries(salaryData.earnings || {}).map(([key, value]) => (
-                key !== 'total' && (
+              {Object.entries(salaryData.earnings || {}).map(([key, value]) => {
+                const norm = (s = '') => s.toLowerCase().replace(/[_\s]/g, '');
+                const nk = norm(key);
+                const match = (salaryData.tplEarnKeys || []).find(tk => norm(tk) === nk);
+                const label = match || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+                return (
                   <View key={key} style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>
-                      {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                    </Text>
+                    <Text style={styles.detailLabel}>{label}</Text>
                     <Text style={styles.detailValue}>{formatCurrency(value)}</Text>
                   </View>
-                )
-              ))}
+                );
+              })}
             </View>
 
             <View style={styles.sectionCard}>
@@ -458,16 +483,19 @@ export default function SalaryReportScreen({ navigation }) {
 
             <View style={styles.sectionCard}>
               <Text style={[styles.sectionTitle, styles.deductionTitle]}>Deductions</Text>
-              {Object.entries(salaryData.deductions || {}).map(([key, value]) => (
-                key !== 'total' && (
+              {Object.entries(salaryData.deductions || {}).map(([key, value]) => {
+                const norm = (s = '') => s.toLowerCase().replace(/[_\s]/g, '');
+                const nk = norm(key);
+                const match = (salaryData.tplDedKeys || []).find(tk => norm(tk) === nk);
+                const label = match || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+                return (
                   <View key={key} style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>
-                      {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                    </Text>
+                    <Text style={styles.detailLabel}>{label}</Text>
                     <Text style={[styles.detailValue, styles.deductionValue]}>{formatCurrency(value)}</Text>
                   </View>
-                )
-              ))}
+                );
+              })}
             </View>
 
             {salaryData && salaryData.isGenerated ? (
