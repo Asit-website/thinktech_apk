@@ -258,8 +258,8 @@ export default function HistoryScreen({ navigation }) {
             { label: 'Holiday', value: String(history?.summary?.holiday ?? 0), bg: '#FFFDC4', cl: '#FFAB00' },
             { label: 'Overtime', value: String(history?.summary?.overtime ?? 0), bg: '#CFF6FF', cl: '#007B80' },
             { label: 'Late', value: String(history?.summary?.lateCount ?? 0), bg: '#F2E8FF', cl: '#9500F8' },
-            { label: 'Penalty', value: String(history?.summary?.latePenaltyDays ?? 0), bg: '#FFE2E2', cl: '#CA0000' },
-            { label: 'Fine', value: '0', bg: '#FFCDDB', cl: '#007B80' },
+            // { label: 'Penalty', value: String(history?.summary?.latePenaltyDays ?? 0), bg: '#FFE2E2', cl: '#CA0000' },
+            // { label: 'Fine', value: '0', bg: '#FFCDDB', cl: '#007B80' },
           ].map((s) => (
             <View key={s.label} style={[styles.statCard, { backgroundColor: s.bg, color: s.cl }]}>
               <Text style={[styles.statLabel, { color: s.cl }]}>{s.label}</Text>

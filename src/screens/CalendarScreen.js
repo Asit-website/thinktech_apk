@@ -201,8 +201,8 @@ export default function CalendarScreen({ navigation }) {
           <View style={styles.detailCard}>
             <Text style={styles.detailTitle}>{selected.date}</Text>
             <Text style={styles.detailSub}>Status: {String(selected.dayStatus || 'NA')}</Text>
-            {selected.reason ? (
-              <Text style={[styles.detailSub, { color: '#CA0000', fontWeight: '600' }]}>Reason: {selected.reason}</Text>
+            {selected.hasLateRule && selected.latePunchInMinutes > 0 ? (
+              <Text style={[styles.detailSub, { color: '#CA0000', fontWeight: '600' }]}>Late by {selected.latePunchInMinutes} min</Text>
             ) : null}
             {selected.dayStatus === 'LEAVE' && selected.leaveType ? (
               <Text style={styles.detailSub}>Leave Type: {String(selected.leaveType)}</Text>

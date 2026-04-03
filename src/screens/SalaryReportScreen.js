@@ -322,9 +322,9 @@ export default function SalaryReportScreen({ navigation }) {
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount || 0);
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 5,
+    }).format(Number(amount || 0));
   };
 
   const openNotifications = () => {

@@ -76,12 +76,16 @@ export default function App() {
     };
   }, []);
 
+  //this is sync
+
   useEffect(() => {
     async function onFetchUpdateAsync() {
       try {
+        console.info(`[Updates] Checking for update... Runtime: ${Updates.runtimeVersion}, Channel: ${Updates.channel || 'N/A'}`);
         const update = await Updates.checkForUpdateAsync();
 
         if (update.isAvailable) {
+          console.info(`[Updates] New update available: ${update.manifest.id}`);
           Alert.alert(
             'Update Available',
             'A new version of the app is available. Please update now to get the latest features.',
@@ -93,6 +97,7 @@ export default function App() {
                     await Updates.fetchUpdateAsync();
                     await Updates.reloadAsync();
                   } catch (error) {
+                    console.error(`[Updates] Fetch error: ${error}`);
                     Alert.alert('Error', 'Failed to fetch the update. Please try again later.');
                   }
                 },
@@ -100,10 +105,13 @@ export default function App() {
             ],
             { cancelable: false }
           );
+        } else {
+          console.info('[Updates] No new update available.');
         }
       } catch (error) {
-        // You can also log error to an error reporting service here
-        console.log(`Error fetching latest Expo update: ${error}`);
+        console.error(`[Updates] Check error: ${error}`);
+        // Only alert on check error if we're in a non-dev environment and troubleshooting
+        // Alert.alert('Update Check Failed', `Error: ${error.message}`);
       }
     }
 

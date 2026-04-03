@@ -3,6 +3,8 @@ import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ScrollVi
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getMyProfile, updateMyProfile } from '../config/api';
 import { notifyError, notifySuccess } from '../utils/notify';
+import * as Updates from 'expo-updates';
+import { Alert } from 'react-native';
 
 export default function AccountSettingsScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
@@ -57,6 +59,43 @@ export default function AccountSettingsScreen({ navigation }) {
     navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
   };
 
+  const onCheckUpdate = async () => {
+    try {
+      setLoading(true);
+      const update = await Updates.checkForUpdateAsync();
+      if (update.isAvailable) {
+        Alert.alert(
+          'Update Available',
+          'A new version of the app is available. Please update now to get the latest features.',
+          [
+            {
+              text: 'Update Now',
+              onPress: async () => {
+                try {
+                  await Updates.fetchUpdateAsync();
+                  await Updates.reloadAsync();
+                } catch (error) {
+                  Alert.alert('Error', 'Failed to fetch the update. Please try again later.');
+                }
+              },
+            },
+            {
+              text: 'Cancel',
+              style: 'cancel'
+            }
+          ]
+        );
+      } else {
+        notifySuccess('The app is up to date.');
+      }
+    } catch (error) {
+      console.error(`[Updates] Manual check error: ${error}`);
+      notifyError(`Update check failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+  // this
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.header}>
@@ -81,6 +120,20 @@ export default function AccountSettingsScreen({ navigation }) {
 
           <Text style={styles.label}>Email (Editable)</Text>
           <TextInput value={email} onChangeText={setEmail} style={styles.input} placeholder="Enter email" keyboardType="email-address" autoCapitalize="none" />
+
+          <View style={{ marginTop: 24, paddingVertical: 12, borderTopWidth: 1, borderTopColor: '#f1f1f1' }}>
+            <Text style={[styles.label, { marginTop: 0 }]}>App Management</Text>
+            <TouchableOpacity 
+              style={[styles.input, { backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' }]} 
+              onPress={onCheckUpdate}
+              disabled={loading}
+            >
+              {loading ? <ActivityIndicator size="small" color="#125EC9" /> : <Text style={{ color: '#125EC9', fontFamily: 'Inter_600SemiBold' }}>Check for Updates</Text>}
+            </TouchableOpacity>
+            <Text style={{ fontSize: 10, color: '#9ca3af', marginTop: 6, textAlign: 'center' }}>
+              Channel: {Updates.channel || 'N/A'} | Runtime: {Updates.runtimeVersion || 'N/A'}
+            </Text>
+          </View>
         </View>
 
         <View style={{ height: 12 }} />

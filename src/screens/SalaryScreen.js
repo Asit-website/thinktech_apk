@@ -216,8 +216,8 @@ export default function SalaryScreen({ navigation }) {
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: 'INR',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 5,
     }).format(Number(amount || 0));
   };
 
@@ -330,9 +330,10 @@ export default function SalaryScreen({ navigation }) {
               unpaidDays: Number(s.unpaidLeave || 0),
               lateCount: Number(s.lateCount || 0),
               latePenaltyDays: Number(s.latePenaltyDays || 0),
+              latePenalty: Number(s.latePenalty || 0),
             },
             attendanceInfo: {
-              payableDays: (Number(s.present || 0) + Number(s.half || 0) * 0.5 + Number(s.weeklyOff || 0) + Number(s.holidays || 0) + Number(s.paidLeave || 0)) - Number(s.latePenaltyDays || 0),
+              payableDays: (Number(s.present || 0) + Number(s.half || 0) * 0.5 + Number(s.weeklyOff || 0) + Number(s.holidays || 0) + Number(s.paidLeave || 0)),
               totalWorkingDays: daysInMonth,
               attendancePercentage: ((Number(s.present || 0) + Number(s.half || 0) * 0.5) / Math.max(1, daysInMonth)) * 100,
             },
@@ -555,9 +556,9 @@ export default function SalaryScreen({ navigation }) {
                     <Row label="Weekly Off Days" amount={(monthSpecificData.attendanceData?.weeklyOffDays || 0).toString()} />
                     <Row label="Holidays" amount={(monthSpecificData.attendanceData?.holidays || 0).toString()} />
                     <Row label="Absent Days" amount={(monthSpecificData.attendanceData?.absentDays || 0).toString()} />
-                    <Row label="Late Count" amount={(monthSpecificData.attendanceData?.lateCount || 0).toString()} />
-                    <Row label="Late Penalty (Days)" amount={(monthSpecificData.attendanceData?.latePenaltyDays || 0).toString()} />
-                    <Row label="Payable Days" amount={monthSpecificData.attendanceInfo?.payableDays?.toString?.() || '--'} />
+                     <Row label="Late Count" amount={(monthSpecificData.attendanceData?.lateCount || 0).toString()} />
+                    <Row label="Late Penalty" amount={formatCurrency(monthSpecificData.attendanceData?.latePenalty || 0)} />
+                    <Row label="Payable Days" amount={(monthSpecificData.attendanceInfo?.payableDays ?? 0).toString() + " days"} />
                   </>
                 ) : (
                   <Row label="Status" amount={monthSpecificData?.isFutureMonth ? 'Future month - Attendance not yet recorded' : 'Current/past month'} />

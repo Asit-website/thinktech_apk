@@ -4,7 +4,7 @@
     "slug": "vetansutra",
     "version": "1.0.0",
     "updates": {
-      "url": "https://u.expo.dev/dd92ca67-f9be-4de2-ae84-449bde2da45e"
+      "url": "https://u.expo.dev/2f9b5ce2-7b55-475e-be75-b553b8494b03"
     },
     "runtimeVersion": {
       "policy": "appVersion"
@@ -52,6 +52,12 @@
     },
     "plugins": [
       [
+        "expo-updates",
+        {
+          "checkOnLaunch": "ALWAYS"
+        }
+      ],
+      [
         "expo-av",
         {
           "microphonePermission": "Allow Godown Management to access your microphone for audio entry."
@@ -82,7 +88,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "dd92ca67-f9be-4de2-ae84-449bde2da45e"
+        "projectId": "2f9b5ce2-7b55-475e-be75-b553b8494b03"
       }
     }
   }
