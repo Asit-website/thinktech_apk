@@ -132,6 +132,21 @@ export default function SalaryReportScreen({ navigation }) {
   const [isLoading, setIsLoading] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [hasAnyAttendance, setHasAnyAttendance] = useState(true);
+  const [earliestMonth, setEarliestMonth] = useState(null);
+
+  useEffect(() => {
+    const fetchRange = async () => {
+      try {
+        const res = await api.get('/me/salary-history-range');
+        if (res.data?.success && res.data.earliestMonth) {
+          setEarliestMonth(res.data.earliestMonth);
+        }
+      } catch (e) {
+        console.error('Error fetching range:', e);
+      }
+    };
+    fetchRange();
+  }, []);
 
   useEffect(() => {
     fetchSalaryData();
@@ -148,7 +163,10 @@ export default function SalaryReportScreen({ navigation }) {
   const monthStart = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
   const currentMonthStart = monthStart(new Date());
   const selectedMonthStart = monthStart(selectedDate);
-  const canGoPrevMonth = !staffStartMonth || selectedMonthStart > monthStart(staffStartMonth);
+  const canGoPrevMonth = (() => {
+    const limit = earliestMonth ? new Date(earliestMonth) : new Date(new Date().getFullYear() - 3, 0, 1);
+    return selectedMonthStart > monthStart(limit);
+  })();
   const canGoNextMonth = selectedMonthStart < currentMonthStart;
 
   const prevMonth = () => {
@@ -188,7 +206,8 @@ export default function SalaryReportScreen({ navigation }) {
   const handleWebMonthChange = (monthStr) => {
     const [year, month] = monthStr.split('-').map(Number);
     const newDate = new Date(year, month - 1, 1);
-    if (staffStartMonth && monthStart(newDate) < monthStart(staffStartMonth)) return;
+    const limit = earliestMonth ? new Date(earliestMonth) : new Date(new Date().getFullYear() - 3, 0, 1);
+    if (monthStart(newDate) < monthStart(limit)) return;
     if (monthStart(newDate) > currentMonthStart) return;
     setSelectedDate(newDate);
   };
@@ -521,7 +540,7 @@ export default function SalaryReportScreen({ navigation }) {
                 type="month"
                 value={`${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`}
                 onChange={(e) => handleWebMonthChange(e.target.value)}
-                min={staffStartMonth ? `${staffStartMonth.getFullYear()}-${String(staffStartMonth.getMonth() + 1).padStart(2, '0')}` : undefined}
+                min={(new Date(new Date().getFullYear() - 3, 0, 1)).toISOString().slice(0, 7)}
                 max={`${currentMonthStart.getFullYear()}-${String(currentMonthStart.getMonth() + 1).padStart(2, '0')}`}
                 style={styles.webDatePicker}
               />
@@ -544,7 +563,7 @@ export default function SalaryReportScreen({ navigation }) {
           mode="date"
           display="default"
           onChange={handleNativeMonthChange}
-          minimumDate={staffStartMonth || new Date(2020, 0, 1)}
+          minimumDate={new Date(new Date().getFullYear() - 3, 0, 1)}
           maximumDate={currentMonthStart}
         />
       )}

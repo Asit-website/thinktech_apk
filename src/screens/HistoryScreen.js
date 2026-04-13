@@ -182,7 +182,8 @@ export default function HistoryScreen({ navigation }) {
         if (d.dayStatus === 'HOLIDAY') tokens.push({ t: 'Holiday', v: 'Paid' });
         if (d.dayStatus === 'WEEKLY_OFF') tokens.push({ t: 'Weekly Off', v: 'Off' });
 
-        if (d.isPenaltyDay) tokens.push({ t: 'Penalty', v: 'Late' });
+        if (d.latePunchInMinutes > 0) tokens.push({ t: 'Late', v: `${d.latePunchInMinutes} min` });
+        else if (d.isPenaltyDay) tokens.push({ t: 'Late', v: 'Penalty' });
         else if (d.isLate) tokens.push({ t: 'Late', v: 'arrival' });
 
         if (d.reason && (d.isLate || d.dayStatus === 'ABSENT')) {

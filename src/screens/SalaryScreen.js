@@ -221,13 +221,30 @@ export default function SalaryScreen({ navigation }) {
     }).format(Number(amount || 0));
   };
 
-  // Month state and handlers
+  const [earliestMonth, setEarliestMonth] = useState(null);
+
+  // Fetch earliest salary month for navigation limit
+  useEffect(() => {
+    const fetchRange = async () => {
+      try {
+        const res = await api.get('/me/salary-history-range');
+        if (res.data?.success && res.data.earliestMonth) {
+          setEarliestMonth(res.data.earliestMonth);
+        }
+      } catch (e) {
+        console.error('Error fetching salary range:', e);
+      }
+    };
+    fetchRange();
+  }, []);
+
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
   ];
   const staffStartMonth = React.useMemo(() => {
     const candidates = [
+      earliestMonth,
       user?.profile?.dateOfJoining,
       user?.createdAt,
       user?.profile?.createdAt,
@@ -237,7 +254,7 @@ export default function SalaryScreen({ navigation }) {
       if (!Number.isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), 1);
     }
     return null;
-  }, [user]);
+  }, [user, earliestMonth]);
 
   const currentMonthStart = React.useMemo(() => {
     const d = new Date();
@@ -249,7 +266,12 @@ export default function SalaryScreen({ navigation }) {
   const [year, setYear] = React.useState(today.getFullYear());
   const selectedMonthStart = React.useMemo(() => new Date(year, monthIdx, 1), [year, monthIdx]);
   const canGoPrevMonth = React.useMemo(() => {
-    if (!staffStartMonth) return true;
+    if (!staffStartMonth) {
+      const threeYearsAgo = new Date();
+      threeYearsAgo.setFullYear(threeYearsAgo.getFullYear() - 3);
+      threeYearsAgo.setDate(1);
+      return selectedMonthStart > threeYearsAgo;
+    }
     return selectedMonthStart > staffStartMonth;
   }, [selectedMonthStart, staffStartMonth]);
   const canGoNextMonth = React.useMemo(() => selectedMonthStart < currentMonthStart, [selectedMonthStart, currentMonthStart]);

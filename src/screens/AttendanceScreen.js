@@ -548,7 +548,7 @@ export default function AttendanceScreen({ navigation }) {
       <Modal visible={notifOpen} transparent animationType="slide" onRequestClose={() => setNotifOpen(false)}>
         <View style={styles.notifBackdrop}>
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setNotifOpen(false)} />
-          <View style={styles.notifPanel}>
+          <SafeAreaView style={styles.notifPanel} edges={['top', 'bottom']}>
             <View style={styles.notifHeader}>
               <Text style={styles.notifTitle}>Notifications</Text>
               <TouchableOpacity onPress={() => setNotifOpen(false)}><Text style={styles.notifClose}>✕</Text></TouchableOpacity>
@@ -577,7 +577,7 @@ export default function AttendanceScreen({ navigation }) {
                 <Text style={{ color: '#fff', fontFamily: 'Inter_600SemiBold' }}>Mark read</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </SafeAreaView>
         </View>
       </Modal>
       {/* Photo preview popup */}

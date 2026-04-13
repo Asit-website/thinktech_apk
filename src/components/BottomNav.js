@@ -31,12 +31,12 @@ export default function BottomNav({ navigation, activeKey = 'home', items }) {
 
   const onPressTab = (t) => {
     if (navigation && t.route) {
-      try { navigation.navigate(t.route); } catch (e) {}
+      try { navigation.navigate(t.route); } catch (e) { }
     }
   };
 
   return (
-    <View style={styles.wrap}> 
+    <View style={styles.wrap}>
       {tabs.map((t) => {
         const active = activeKey === t.key;
         return (

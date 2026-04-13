@@ -26,7 +26,7 @@ export default function OTPScreen({ route, navigation }) {
   const { refreshPermissions } = usePermissions();
 
   const animateAutoFill = (otpStr) => {
-    try { if (autoFillTimerRef.current) clearInterval(autoFillTimerRef.current); } catch {}
+    try { if (autoFillTimerRef.current) clearInterval(autoFillTimerRef.current); } catch { }
     const text = String(otpStr || '').replace(/[^0-9]/g, '').slice(0, 6);
     if (!text) return;
     setCode('');
@@ -35,7 +35,7 @@ export default function OTPScreen({ route, navigation }) {
       i += 1;
       setCode(text.slice(0, i));
       if (i >= text.length) {
-        try { clearInterval(autoFillTimerRef.current); } catch {}
+        try { clearInterval(autoFillTimerRef.current); } catch { }
         autoFillTimerRef.current = null;
       }
     }, 90); // slight typing animation per digit
@@ -57,13 +57,13 @@ export default function OTPScreen({ route, navigation }) {
         try {
           const res = await getLatestOtpForPhone(phone);
           if (active && res?.otp) animateAutoFill(String(res.otp));
-        } catch {}
+        } catch { }
       }, 2200); // ~2.2s delay before autofill
     }
     return () => {
       active = false;
       if (timer) clearTimeout(timer);
-      try { if (autoFillTimerRef.current) clearInterval(autoFillTimerRef.current); } catch {}
+      try { if (autoFillTimerRef.current) clearInterval(autoFillTimerRef.current); } catch { }
       autoFillTimerRef.current = null;
     };
   }, [phone]);
@@ -74,11 +74,11 @@ export default function OTPScreen({ route, navigation }) {
     let timer = null;
     let attempts = 0;
     const maxAttempts = 20; // Try for ~2 minutes
-    
+
     const fetchOtpFromDatabase = async () => {
       try {
         if (!phone || !active) return;
-        
+
         const response = await getLatestOtpForPhone(phone);
         if (response?.success && response?.otp && active) {
           const otpStr = String(response.otp).replace(/[^0-9]/g, '').slice(0, 6);
@@ -89,7 +89,7 @@ export default function OTPScreen({ route, navigation }) {
             return;
           }
         }
-        
+
         attempts++;
         if (attempts < maxAttempts && active) {
           timer = setTimeout(fetchOtpFromDatabase, 6000); // Check every 6 seconds
@@ -102,12 +102,12 @@ export default function OTPScreen({ route, navigation }) {
         }
       }
     };
-    
+
     // Start fetching after a small delay
     if (phone) {
       timer = setTimeout(fetchOtpFromDatabase, 3000); // Start after 3 seconds
     }
-    
+
     return () => {
       active = false;
       if (timer) clearTimeout(timer);
@@ -141,7 +141,7 @@ export default function OTPScreen({ route, navigation }) {
         setTimeout(() => {
           try {
             navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
-          } catch (e) {}
+          } catch (e) { }
         }, 650);
       } else {
         notifyError(res?.message || 'Invalid OTP. Please try again.');

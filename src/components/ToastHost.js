@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { setToastHandler } from '../utils/toastBus';
 
 export default function ToastHost() {
   const [toast, setToast] = useState(null);
   const opacity = useRef(new Animated.Value(0)).current;
   const hideTimer = useRef(null);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     setToastHandler((next) => {
@@ -31,11 +33,10 @@ export default function ToastHost() {
   const type = toast.type || 'info';
   const title = toast.title || (type === 'success' ? 'Success' : type === 'error' ? 'Error' : 'Info');
   const message = toast.message || '';
-
   const bg = type === 'success' ? '#16A34A' : type === 'error' ? '#DC2626' : '#125EC9';
 
   return (
-    <Animated.View style={[styles.wrap, { opacity }]} pointerEvents="none">
+    <Animated.View style={[styles.wrap, { opacity, paddingTop: 54 + insets.top }]} pointerEvents="none">
       <View style={[styles.card, { backgroundColor: bg }]}>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.msg}>{message}</Text>

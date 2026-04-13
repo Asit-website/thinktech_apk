@@ -4,6 +4,9 @@ import * as Updates from 'expo-updates';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
+
 import LoginScreen from './src/screens/LoginScreen';
 import OTPScreen from './src/screens/OTPScreen';
 import HomeScreen from './src/screens/HomeScreen';
@@ -41,7 +44,6 @@ import ToastHost from './src/components/ToastHost';
 import AndroidNotification from './src/components/AndroidNotification';
 import { setNotificationRef } from './src/utils/notify';
 import { PermissionsProvider } from './src/contexts/PermissionsContext';
-import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { defineBackgroundTask } from './src/services/locationService';
 
 // Register background location task (must be called at module level, before app renders)
@@ -76,8 +78,6 @@ export default function App() {
     };
   }, []);
 
-  //this is sync
-
   useEffect(() => {
     async function onFetchUpdateAsync() {
       try {
@@ -110,21 +110,16 @@ export default function App() {
         }
       } catch (error) {
         console.error(`[Updates] Check error: ${error}`);
-        // Only alert on check error if we're in a non-dev environment and troubleshooting
-        // Alert.alert('Update Check Failed', `Error: ${error.message}`);
       }
     }
 
     if (!__DEV__) {
       onFetchUpdateAsync();
-
-      // Check for updates when the app returns from background to foreground
       const subscription = AppState.addEventListener('change', nextAppState => {
         if (nextAppState === 'active') {
           onFetchUpdateAsync();
         }
       });
-
       return () => {
         subscription.remove();
       };
@@ -132,7 +127,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // Set up notification ref
     notificationRef.current = {
       show: (title, message, type) => {
         setNotification({ visible: true, title, message, type });
@@ -148,53 +142,56 @@ export default function App() {
   if (!fontsLoaded || !initialRoute) return null;
 
   return (
-    <PermissionsProvider>
-      <NavigationContainer>
-        <ToastHost />
-        <AndroidNotification
-          visible={notification.visible}
-          title={notification.title}
-          message={notification.message}
-          type={notification.type}
-          onClose={handleNotificationClose}
-        />
-        <Stack.Navigator initialRouteName={initialRoute}>
-          <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="OTP" component={OTPScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Attendance" component={AttendanceScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="AttendanceReport" component={AttendanceReportScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Leave" component={LeaveScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="ApplyLeave" component={ApplyLeaveScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="History" component={HistoryScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="ClaimEncashment" component={ClaimEncashmentScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Calendar" component={CalendarScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Profile" component={ProfileScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="MyDocuments" component={MyDocumentsScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="BankDetails" component={BankDetailsScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="GeneralInfo" component={GeneralInfoScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="HelpSupport" component={HelpSupportScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Sales" component={SalesScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="SalesReport" component={SalesReportScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="VisitForm" component={VisitFormScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Salary" component={SalaryScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="SalaryReport" component={SalaryReportScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Reports" component={ReportsScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="AssignedJobs" component={AssignedJobsScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="AssignedJobDetail" component={AssignedJobDetailScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Targets" component={TargetsScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="OrderForm" component={OrderFormScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Expense" component={ExpenseScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="TodoList" component={TodoListScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Activity" component={ActivityScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Meeting" component={MeetingScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="Ticket" component={TicketScreen} options={{ headerShown: false }} />
-          <Stack.Screen name="AIChat" component={AIChatScreen} options={{ headerShown: false }} />
-        </Stack.Navigator>
-      </NavigationContainer>
-    </PermissionsProvider>
+    <SafeAreaProvider>
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#ffffff' }} edges={['top', 'bottom']}>
+        <PermissionsProvider>
+          <NavigationContainer>
+            <ToastHost />
+            <AndroidNotification
+              visible={notification.visible}
+              title={notification.title}
+              message={notification.message}
+              type={notification.type}
+              onClose={handleNotificationClose}
+            />
+            <Stack.Navigator initialRouteName={initialRoute}>
+              <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="OTP" component={OTPScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Attendance" component={AttendanceScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="AttendanceReport" component={AttendanceReportScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Leave" component={LeaveScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="ApplyLeave" component={ApplyLeaveScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="History" component={HistoryScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="ClaimEncashment" component={ClaimEncashmentScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Calendar" component={CalendarScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Profile" component={ProfileScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="MyDocuments" component={MyDocumentsScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="BankDetails" component={BankDetailsScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="GeneralInfo" component={GeneralInfoScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="HelpSupport" component={HelpSupportScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Sales" component={SalesScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="SalesReport" component={SalesReportScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="VisitForm" component={VisitFormScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Salary" component={SalaryScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="SalaryReport" component={SalaryReportScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Reports" component={ReportsScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="AssignedJobs" component={AssignedJobsScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="AssignedJobDetail" component={AssignedJobDetailScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Targets" component={TargetsScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="OrderForm" component={OrderFormScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Expense" component={ExpenseScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="TodoList" component={TodoListScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Activity" component={ActivityScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Meeting" component={MeetingScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Ticket" component={TicketScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="AIChat" component={AIChatScreen} options={{ headerShown: false }} />
+            </Stack.Navigator>
+          </NavigationContainer>
+        </PermissionsProvider>
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
-

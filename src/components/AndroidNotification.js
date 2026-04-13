@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function AndroidNotification({ visible, title, message, type, onClose }) {
   const [fadeAnim] = useState(new Animated.Value(0));
+  const insets = useSafeAreaInsets();
   
   useEffect(() => {
     if (visible) {
@@ -43,7 +45,7 @@ export default function AndroidNotification({ visible, title, message, type, onC
       animationType="fade"
       onRequestClose={handleClose}
     >
-      <Animated.View style={[styles.overlay, { opacity: fadeAnim }]}>
+      <Animated.View style={[styles.overlay, { opacity: fadeAnim, paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}>
         <View style={[styles.notificationBox, { backgroundColor: bgColor }]}>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>

@@ -4,7 +4,7 @@
     "slug": "vetansutra",
     "version": "1.0.0",
     "updates": {
-      "url": "https://u.expo.dev/2f9b5ce2-7b55-475e-be75-b553b8494b03"
+      "url": "https://u.expo.dev/79e40c20-066b-4d8a-9bb4-a33783a867d3"
     },
     "runtimeVersion": {
       "policy": "appVersion"
@@ -13,6 +13,7 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "splash": {
+      "image": "./assets/splash.png",
       "backgroundColor": "#ffffff",
       "resizeMode": "contain"
     },
@@ -45,7 +46,11 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.INTERNET"
-      ]
+      ],
+      "navigationBar": {
+        "backgroundColor": "#000000",
+        "barStyle": "light-content"
+      }
     },
     "web": {
       "bundler": "metro"
@@ -88,7 +93,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "2f9b5ce2-7b55-475e-be75-b553b8494b03"
+        "projectId": "79e40c20-066b-4d8a-9bb4-a33783a867d3"
       }
     }
   }
