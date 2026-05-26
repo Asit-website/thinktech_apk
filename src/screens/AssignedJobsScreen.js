@@ -24,11 +24,14 @@ export default function AssignedJobsScreen() {
       });
       const mapped = filtered.map((r) => ({
         id: String(r.id),
+        clientId: r.client?.id,
         client: r.client?.name || 'Client',
         address: r.client?.location || '',
         tag: String(r.status || 'pending').toUpperCase(),
       }));
-      setJobs(mapped);
+
+      const uniqueJobs = mapped.filter((v, i, a) => a.findIndex(t => t.clientId === v.clientId) === i);
+      setJobs(uniqueJobs);
     } catch {}
     finally { setLoading(false); }
   }, []);

@@ -125,8 +125,8 @@ export default function OTPScreen({ route, navigation }) {
     try {
       const res = await verifyOtp(phone, code.trim());
       if (res?.success) {
-        // Check if user has staff role
-        if (res?.user?.role !== 'staff') {
+        // Check if user has staff role or superadmin_staff role
+        if (res?.user?.role !== 'staff' && res?.user?.role !== 'superadmin_staff') {
           notifyError('You are not allowed because you are not a staff member');
           // Clear any stored tokens
           await AsyncStorage.removeItem('auth_token');
@@ -140,14 +140,15 @@ export default function OTPScreen({ route, navigation }) {
         refreshPermissions();
         setTimeout(() => {
           try {
-            navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+            navigation.reset({ index: 0, routes: [{ name: 'Attendance' }] });
           } catch (e) { }
         }, 650);
       } else {
         notifyError(res?.message || 'Invalid OTP. Please try again.');
       }
     } catch (err) {
-      notifyError('Unable to verify OTP. Please try again.');
+      const msg = err.response?.data?.message || 'Unable to verify OTP. Please try again.';
+      notifyError(msg);
     } finally {
       setLoading(false);
     }
@@ -170,7 +171,7 @@ export default function OTPScreen({ route, navigation }) {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={styles.container}>
         <View style={styles.topArea}>
           <Image
@@ -226,7 +227,7 @@ export default function OTPScreen({ route, navigation }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#ffffff' },
-  container: { flex: 1, paddingHorizontal: 20, paddingTop: 24, paddingBottom: 120 },
+  container: { flex: 1, paddingHorizontal: 20, paddingTop: 24 },
 
   topArea: { alignItems: 'center', paddingTop: 40 },
   logo: { width: 250, height: 100, resizeMode: 'contain' },
@@ -265,7 +266,7 @@ const styles = StyleSheet.create({
   small: { color: '#363535', marginRight: 6, fontFamily: 'Inter_400Regular', fontSize: 10 },
   resend: { color: '#184181', fontFamily: 'Inter_500Medium', fontSize: 11 },
 
-  footerFixed: { position: 'absolute', left: 0, right: 0, bottom: 30, alignItems: 'center', paddingHorizontal: 20 },
+  footerFixed: { marginTop: 20, marginBottom: 30, alignItems: 'center', paddingHorizontal: 20 },
   primaryBtn: { width: '100%', maxWidth: 320, backgroundColor: '#0F3B8C', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
   primaryText: { color: '#FFFFFF', fontFamily: 'Inter_600SemiBold', fontSize: 14 },
 });

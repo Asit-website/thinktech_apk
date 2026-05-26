@@ -203,7 +203,7 @@ export default function TodoListScreen({ navigation }) {
           )}
         </View>
       </ScrollView>
-      <BottomNav navigation={navigation} activeKey="none" />
+      <BottomNav navigation={navigation} activeKey="task" />
     </SafeAreaView>
   );
 }

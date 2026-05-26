@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
   SafeAreaView, View, Text, StyleSheet, TouchableOpacity,
-  Image, FlatList, Modal, TextInput, ActivityIndicator, Alert, ScrollView, RefreshControl
+  Image, FlatList, Modal, TextInput, ActivityIndicator, Alert, ScrollView, RefreshControl,
+  KeyboardAvoidingView, Platform, Pressable
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { listMyActivities, createActivity, updateActivity, updateActivityStatus, listAllStaff, transferActivity } from '../config/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { notifySuccess, notifyError } from '../utils/notify';
+import dayjs from 'dayjs';
 
 const STATUS_OPTIONS = [
   { label: 'Schedule', value: 'SCHEDULE', color: '#6B7280', bg: '#F3F4F6' },
@@ -23,7 +26,9 @@ export default function ActivityScreen({ navigation }) {
   const [newDesc, setNewDesc] = useState('');
   const [newRemarks, setNewRemarks] = useState('');
   const [newTAT, setNewTAT] = useState(''); // Turn Around Time
+  const [newTAD, setNewTAD] = useState(null); // Turn Around Date
   const [showTATPicker, setShowTATPicker] = useState(false);
+  const [showTADPicker, setShowTADPicker] = useState(false);
   const [filterTab, setFilterTab] = useState('SCHEDULE');
 
   // Custom Picker States
@@ -110,6 +115,7 @@ export default function ActivityScreen({ navigation }) {
         description: newDesc,
         remarks: newRemarks,
         turnAroundTime: newTAT,
+        turnAroundDate: newTAD ? newTAD.toISOString().split('T')[0] : null,
         status: isEditMode ? undefined : 'SCHEDULE',
         date: isEditMode ? undefined : new Date().toISOString().split('T')[0]
       };
@@ -137,6 +143,7 @@ export default function ActivityScreen({ navigation }) {
     setNewDesc('');
     setNewRemarks('');
     setNewTAT('');
+    setNewTAD(null);
     setErrors({});
     setIsEditMode(false);
     setEditingActivityId(null);
@@ -149,6 +156,7 @@ export default function ActivityScreen({ navigation }) {
     setNewDesc(activity.description || '');
     setNewRemarks(activity.remarks || '');
     setNewTAT(activity.turnAroundTime || '');
+    setNewTAD(activity.turnAroundDate ? new Date(activity.turnAroundDate) : null);
     setErrors({});
     setModalVisible(true);
   };
@@ -292,10 +300,12 @@ export default function ActivityScreen({ navigation }) {
               <Text style={styles.remarksText}>{item.remarks}</Text>
             </View>
           ) : null}
-          {item.turnAroundTime ? (
+          {item.turnAroundTime || item.turnAroundDate ? (
             <View style={styles.tatRow}>
               <Text style={styles.tatLabel}>⏱ TAT:</Text>
-              <Text style={styles.tatValue}>{item.turnAroundTime}</Text>
+              <Text style={styles.tatValue}>
+                {item.turnAroundDate ? dayjs(item.turnAroundDate).format('DD MMM') : ''} {item.turnAroundTime || ''}
+              </Text>
             </View>
           ) : null}
           {item.transferredToId ? (
@@ -419,7 +429,10 @@ export default function ActivityScreen({ navigation }) {
       </TouchableOpacity>
 
       <Modal visible={modalVisible} transparent animationType="slide">
-        <View style={styles.modalBg}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalBg}
+        >
           <View style={styles.modalContent}>
             <View style={styles.modalTop}>
               <Text style={styles.modalTitle}>{isEditMode ? 'Edit Activity' : 'Add New Activity'}</Text>
@@ -428,134 +441,195 @@ export default function ActivityScreen({ navigation }) {
               </TouchableOpacity>
             </View>
 
-            <TextInput
-              style={[styles.input, errors.title && styles.inputError]}
-              placeholder="Task Title *"
-              placeholderTextColor="#9CA3AF"
-              value={newTitle}
-              onChangeText={(val) => {
-                setNewTitle(val);
-                if (errors.title) setErrors({ ...errors, title: null });
-              }}
-            />
-            {errors.title && <Text style={styles.errorText}>{errors.title}</Text>}
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <TextInput
+                style={[styles.input, errors.title && styles.inputError]}
+                placeholder="Task Title *"
+                placeholderTextColor="#9CA3AF"
+                value={newTitle}
+                onChangeText={(val) => {
+                  setNewTitle(val);
+                  if (errors.title) setErrors({ ...errors, title: null });
+                }}
+              />
+              {errors.title && <Text style={styles.errorText}>{errors.title}</Text>}
 
-            <TextInput
-              style={[styles.input, { height: 80, textAlignVertical: 'top' }, errors.description && styles.inputError]}
-              placeholder="Description *"
-              placeholderTextColor="#9CA3AF"
-              multiline
-              value={newDesc}
-              onChangeText={(val) => {
-                setNewDesc(val);
-                if (errors.description) setErrors({ ...errors, description: null });
-              }}
-            />
-            {errors.description && <Text style={styles.errorText}>{errors.description}</Text>}
-            <TextInput
-              style={[styles.input, { height: 60, textAlignVertical: 'top' }]}
-              placeholder="Remarks (Optional)"
-              placeholderTextColor="#9CA3AF"
-              multiline
-              value={newRemarks}
-              onChangeText={setNewRemarks}
-            />
+              <TextInput
+                style={[styles.input, { height: 80, textAlignVertical: 'top' }, errors.description && styles.inputError]}
+                placeholder="Description *"
+                placeholderTextColor="#9CA3AF"
+                multiline
+                value={newDesc}
+                onChangeText={(val) => {
+                  setNewDesc(val);
+                  if (errors.description) setErrors({ ...errors, description: null });
+                }}
+              />
+              {errors.description && <Text style={styles.errorText}>{errors.description}</Text>}
+                <TextInput
+                style={[styles.input, { height: 60, textAlignVertical: 'top' }]}
+                placeholder="Remarks (Optional)"
+                placeholderTextColor="#9CA3AF"
+                multiline
+                value={newRemarks}
+                onChangeText={setNewRemarks}
+              />
 
-            <TouchableOpacity
-              style={styles.pickerBtn}
-              onPress={() => setShowTATPicker(true)}
-            >
-              <Text style={styles.pickerLabel}>Turn Around Time (Target Time)</Text>
-              <Text style={styles.pickerValue}>{newTAT || 'Select Time'}</Text>
-            </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+                <TouchableOpacity
+                  style={[styles.pickerBtn, { flex: 1, marginBottom: 0 }]}
+                  onPress={() => setShowTADPicker(true)}
+                >
+                  <Text style={styles.pickerLabel}>Target Date</Text>
+                  <Text style={styles.pickerValue}>
+                    {newTAD ? newTAD.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Select Date'}
+                  </Text>
+                </TouchableOpacity>
 
-            {showTATPicker && (
-              <Modal visible={showTATPicker} transparent animationType="fade">
-                <View style={styles.customPickerOverlay}>
-                  <View style={styles.customPickerBox}>
-                    <Text style={styles.pickerTitle}>Set Target Time</Text>
+                <TouchableOpacity
+                  style={[styles.pickerBtn, { flex: 1, marginBottom: 0 }]}
+                  onPress={() => setShowTATPicker(true)}
+                >
+                  <Text style={styles.pickerLabel}>Target Time</Text>
+                  <Text style={styles.pickerValue}>{newTAT || 'Select Time'}</Text>
+                </TouchableOpacity>
+              </View>
 
-                    <View style={styles.pickerColumns}>
-                      {/* Hours */}
-                      <View style={styles.pickerCol}>
-                        <Text style={styles.colLabel}>HOURS</Text>
-                        <ScrollView showsVerticalScrollIndicator={false} style={styles.colScroll}>
-                          {hours.map(h => (
+              {showTADPicker && Platform.OS !== 'web' && (
+                <DateTimePicker
+                  value={newTAD || new Date()}
+                  mode="date"
+                  display="default"
+                  onChange={(event, selectedDate) => {
+                    setShowTADPicker(false);
+                    if (selectedDate) setNewTAD(selectedDate);
+                  }}
+                />
+              )}
+
+              {showTADPicker && Platform.OS === 'web' && (
+                <Modal visible transparent animationType="fade">
+                  <View style={styles.customPickerOverlay}>
+                    <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowTADPicker(false)} />
+                    <View style={[styles.customPickerBox, { maxHeight: '80%' }]}>
+                      <Text style={styles.pickerTitle}>Select Target Date</Text>
+                      <ScrollView>
+                        {Array.from({ length: 30 }, (_, i) => {
+                          const d = new Date();
+                          d.setDate(d.getDate() + i);
+                          return (
                             <TouchableOpacity
-                              key={h}
-                              style={[styles.colItem, selHour === h && styles.colItemSel]}
-                              onPress={() => setSelHour(h)}
+                              key={i}
+                              style={styles.staffItem}
+                              onPress={() => {
+                                setNewTAD(d);
+                                setShowTADPicker(false);
+                              }}
                             >
-                              <Text style={[styles.colItemText, selHour === h && styles.colItemTextSel]}>{h}</Text>
+                              <Text style={styles.staffName}>{d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</Text>
                             </TouchableOpacity>
-                          ))}
-                        </ScrollView>
-                      </View>
-
-                      {/* Minutes */}
-                      <View style={styles.pickerCol}>
-                        <Text style={styles.colLabel}>MINS</Text>
-                        <ScrollView showsVerticalScrollIndicator={false} style={styles.colScroll}>
-                          {minutes.map(m => (
-                            <TouchableOpacity
-                              key={m}
-                              style={[styles.colItem, selMin === m && styles.colItemSel]}
-                              onPress={() => setSelMin(m)}
-                            >
-                              <Text style={[styles.colItemText, selMin === m && styles.colItemTextSel]}>{m}</Text>
-                            </TouchableOpacity>
-                          ))}
-                        </ScrollView>
-                      </View>
-
-                      {/* AM/PM */}
-                      <View style={[styles.pickerCol, { flex: 0.7 }]}>
-                        <Text style={styles.colLabel}>AM/PM</Text>
-                        <View style={styles.periodBox}>
-                          {['AM', 'PM'].map(p => (
-                            <TouchableOpacity
-                              key={p}
-                              style={[styles.periodBtn, selPeriod === p && styles.periodBtnSel]}
-                              onPress={() => setSelPeriod(p)}
-                            >
-                              <Text style={[styles.periodBtnText, selPeriod === p && styles.periodBtnTextSel]}>{p}</Text>
-                            </TouchableOpacity>
-                          ))}
-                        </View>
-                      </View>
-                    </View>
-
-                    <View style={styles.pickerFooter}>
-                      <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowTATPicker(false)}>
-                        <Text style={styles.cancelBtnText}>Cancel</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirmTime}>
-                        <Text style={styles.confirmBtnText}>Set Time</Text>
+                          );
+                        })}
+                      </ScrollView>
+                      <TouchableOpacity style={styles.statusCancelBtn} onPress={() => setShowTADPicker(false)}>
+                        <Text style={styles.statusCancelText}>Cancel</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
-                </View>
-              </Modal>
-            )}
-
-            <TouchableOpacity style={styles.saveBtn} onPress={handleCreate} disabled={submitting}>
-              {submitting ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.saveBtnText}>{isEditMode ? 'Update Activity' : 'Save Activity'}</Text>
+                </Modal>
               )}
-            </TouchableOpacity>
+
+              {showTATPicker && (
+                <Modal visible={showTATPicker} transparent animationType="fade">
+                  <View style={styles.customPickerOverlay}>
+                    <View style={styles.customPickerBox}>
+                      <Text style={styles.pickerTitle}>Set Target Time</Text>
+
+                      <View style={styles.pickerColumns}>
+                        {/* Hours */}
+                        <View style={styles.pickerCol}>
+                          <Text style={styles.colLabel}>HOURS</Text>
+                          <ScrollView showsVerticalScrollIndicator={false} style={styles.colScroll}>
+                            {hours.map(h => (
+                              <TouchableOpacity
+                                key={h}
+                                style={[styles.colItem, selHour === h && styles.colItemSel]}
+                                onPress={() => setSelHour(h)}
+                              >
+                                <Text style={[styles.colItemText, selHour === h && styles.colItemTextSel]}>{h}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </ScrollView>
+                        </View>
+
+                        {/* Minutes */}
+                        <View style={styles.pickerCol}>
+                          <Text style={styles.colLabel}>MINS</Text>
+                          <ScrollView showsVerticalScrollIndicator={false} style={styles.colScroll}>
+                            {minutes.map(m => (
+                              <TouchableOpacity
+                                key={m}
+                                style={[styles.colItem, selMin === m && styles.colItemSel]}
+                                onPress={() => setSelMin(m)}
+                              >
+                                <Text style={[styles.colItemText, selMin === m && styles.colItemTextSel]}>{m}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </ScrollView>
+                        </View>
+
+                        {/* AM/PM */}
+                        <View style={[styles.pickerCol, { flex: 0.7 }]}>
+                          <Text style={styles.colLabel}>AM/PM</Text>
+                          <View style={styles.periodBox}>
+                            {['AM', 'PM'].map(p => (
+                              <TouchableOpacity
+                                key={p}
+                                style={[styles.periodBtn, selPeriod === p && styles.periodBtnSel]}
+                                onPress={() => setSelPeriod(p)}
+                              >
+                                <Text style={[styles.periodBtnText, selPeriod === p && styles.periodBtnTextSel]}>{p}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        </View>
+                      </View>
+
+                      <View style={styles.pickerFooter}>
+                        <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowTATPicker(false)}>
+                          <Text style={styles.cancelBtnText}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirmTime}>
+                          <Text style={styles.confirmBtnText}>Set Time</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                </Modal>
+              )}
+
+              <TouchableOpacity style={styles.saveBtn} onPress={handleCreate} disabled={submitting}>
+                {submitting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.saveBtnText}>{isEditMode ? 'Update Activity' : 'Save Activity'}</Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Status Selection & Remarks Modal */}
       <Modal visible={statusModalVisible} transparent animationType="fade">
-        <View style={styles.statusModalOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.statusModalOverlay}
+        >
           <View style={styles.statusModalContent}>
             <Text style={styles.statusModalTitle}>Update Activity Status</Text>
             <Text style={styles.statusSubTitle}>Status: {nextStatus}</Text>
-            
+
             <View style={{ marginBottom: 20 }}>
               <Text style={styles.label}>Remarks</Text>
               <TextInput
@@ -568,9 +642,9 @@ export default function ActivityScreen({ navigation }) {
               />
             </View>
 
-            <TouchableOpacity 
-              style={styles.saveBtn} 
-              onPress={handleUpdateStatus} 
+            <TouchableOpacity
+              style={styles.saveBtn}
+              onPress={handleUpdateStatus}
               disabled={submitting}
             >
               {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Confirm Status</Text>}
@@ -580,7 +654,7 @@ export default function ActivityScreen({ navigation }) {
               <Text style={styles.statusCancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Transfer/Share Modal */}

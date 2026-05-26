@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, TextInput, ActivityIndicator, Platform, Modal, Pressable } from 'react-native';
+import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, TextInput, ActivityIndicator, Platform, Modal, Pressable, KeyboardAvoidingView } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { getMyGeneralInfo, updateMyGeneralInfo } from '../config/api';
 import { notifyError, notifySuccess } from '../utils/notify';
@@ -34,6 +34,8 @@ export default function GeneralInfoScreen({ navigation }) {
   const [workLocation, setWorkLocation] = useState('');
   const [reportingManager, setReportingManager] = useState('');
   const [shiftTiming, setShiftTiming] = useState('');
+  const [personalMobileError, setPersonalMobileError] = useState('');
+  const [emergencyContactNumberError, setEmergencyContactNumberError] = useState('');
 
   const [selectKey, setSelectKey] = useState(null); // 'gender' | 'maritalStatus'
 
@@ -54,8 +56,11 @@ export default function GeneralInfoScreen({ navigation }) {
         setNationality(g.nationality || '');
 
         setPersonalMobile(g.personalMobile || '');
+        if ((g.personalMobile || '').length > 10) setPersonalMobileError('cant more than 10 digit');
+
         setEmergencyContactName(g.emergencyContactName || '');
         setEmergencyContactNumber(g.emergencyContactNumber || '');
+        if ((g.emergencyContactNumber || '').length > 10) setEmergencyContactNumberError('cant more than 10 digit');
 
         setCurrentAddress(g.currentAddress || '');
         setPermanentAddress(g.permanentAddress || '');
@@ -82,6 +87,10 @@ export default function GeneralInfoScreen({ navigation }) {
   }, []);
 
   const onSave = async () => {
+    if (personalMobileError || emergencyContactNumberError) {
+      notifyError('Please fix the errors before saving.');
+      return;
+    }
     setSaving(true);
     try {
       const res = await updateMyGeneralInfo({
@@ -151,7 +160,11 @@ export default function GeneralInfoScreen({ navigation }) {
         <View style={{ width: 18 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <ScrollView contentContainerStyle={styles.content}>
         {loading ? (
           <View style={{ paddingVertical: 24 }}><ActivityIndicator /></View>
         ) : null}
@@ -193,13 +206,39 @@ export default function GeneralInfoScreen({ navigation }) {
           <Text style={styles.section}>Contact Details</Text>
 
           <Text style={styles.label}>Personal Mobile Number</Text>
-          <TextInput value={personalMobile} onChangeText={setPersonalMobile} style={styles.input} placeholder="" keyboardType="number-pad" />
+          <TextInput
+            value={personalMobile}
+            onChangeText={(t) => {
+              if (t.length <= 11) {
+                setPersonalMobile(t);
+                if (t.length > 10) setPersonalMobileError('cant more than 10 digit');
+                else setPersonalMobileError('');
+              }
+            }}
+            style={[styles.input, personalMobileError ? { borderColor: '#EF4444', borderWidth: 1 } : null]}
+            placeholder=""
+            keyboardType="number-pad"
+          />
+          {personalMobileError ? <Text style={styles.errorText}>{personalMobileError}</Text> : null}
 
           <Text style={styles.label}>Emergency Contact Name</Text>
           <TextInput value={emergencyContactName} onChangeText={setEmergencyContactName} style={styles.input} placeholder="" />
 
           <Text style={styles.label}>Emergency Contact Number</Text>
-          <TextInput value={emergencyContactNumber} onChangeText={setEmergencyContactNumber} style={styles.input} placeholder="" keyboardType="number-pad" />
+          <TextInput
+            value={emergencyContactNumber}
+            onChangeText={(t) => {
+              if (t.length <= 11) {
+                setEmergencyContactNumber(t);
+                if (t.length > 10) setEmergencyContactNumberError('cant more than 10 digit');
+                else setEmergencyContactNumberError('');
+              }
+            }}
+            style={[styles.input, emergencyContactNumberError ? { borderColor: '#EF4444', borderWidth: 1 } : null]}
+            placeholder=""
+            keyboardType="number-pad"
+          />
+          {emergencyContactNumberError ? <Text style={styles.errorText}>{emergencyContactNumberError}</Text> : null}
 
           <Text style={styles.label}>Current Address</Text>
           <TextInput value={currentAddress} onChangeText={setCurrentAddress} style={[styles.input, styles.multiline]} placeholder="" multiline />
@@ -244,6 +283,7 @@ export default function GeneralInfoScreen({ navigation }) {
 
         <View style={{ height: 30 }} />
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Picker Modal */}
       <Modal visible={!!selectKey} transparent animationType="fade" onRequestClose={() => setSelectKey(null)}>
@@ -318,4 +358,5 @@ const styles = StyleSheet.create({
   modalContent: { backgroundColor: '#fff', borderRadius: 12, padding: 8, minWidth: 200, maxWidth: 300 },
   modalOption: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 8 },
   modalOptionText: { color: '#111827', fontFamily: 'Inter_500Medium', fontSize: 14 },
+  errorText: { color: '#EF4444', fontSize: 11, marginTop: 4, marginLeft: 4, fontFamily: 'Inter_500Medium' },
 });

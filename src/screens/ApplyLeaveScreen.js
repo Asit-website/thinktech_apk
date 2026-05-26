@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Modal, Pressable, Platform, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, Modal, Pressable, Platform, TextInput, Alert, ActivityIndicator, KeyboardAvoidingView } from 'react-native';
 import BottomNav from '../components/BottomNav';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { createLeaveRequest, getMyLeaveCategories } from '../config/api';
+import { createLeaveRequest, getMyLeaveCategories, checkLeaveRange } from '../config/api';
 import { notifyError, notifyInfo, notifySuccess } from '../utils/notify';
 
 function formatDate(d) {
@@ -50,7 +50,13 @@ export default function ApplyLeaveScreen({ navigation }) {
       try {
         const res = await getMyLeaveCategories();
         if (running && res?.success) {
-          setCategories(Array.isArray(res.categories) ? res.categories : []);
+          const raw = Array.isArray(res.categories) ? res.categories : [];
+          // Explicitly filter out any "unpaid" categories from the mobile UI
+          const filtered = raw.filter(c => 
+            c.key?.toLowerCase() !== 'unpaid' && 
+            !c.name?.toLowerCase().includes('unpaid')
+          );
+          setCategories(filtered);
         }
       } catch (e) {}
     })();
@@ -68,103 +74,131 @@ export default function ApplyLeaveScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.field}>
-          <Text style={styles.label}>Leave Category</Text>
-          <TouchableOpacity onPress={() => setShowType(true)} activeOpacity={0.8} style={styles.inputRow}>
-            <Text style={[styles.placeholder, categoryKey ? styles.valueText : null]}>
-              {categoryKey ? categoryLabel(categories.find(c => c.key === categoryKey) || { name: categoryKey, remaining: 0 }) : 'Select category'}
-            </Text>
-            <Image source={require('../assets/down.png')} style={{ width: 12, height: 12 }} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.row}>
-          <View style={[styles.field, styles.colLeft]}>
-            <Text style={styles.label}>Start Date</Text>
-            <TouchableOpacity
-              onPress={() => setShowStart(true)}
-              activeOpacity={0.8}
-              style={styles.inputRow}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Image source={require('../assets/calendar2-range.png')} style={{ width: 14, height: 14 }} />
-                <Text style={[styles.placeholder, { marginLeft: 8 }, startDate && styles.valueText]}>{formatDate(startDate)}</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-
-          <View style={[styles.field, styles.colRight]}>
-            <Text style={styles.label}>End Date</Text>
-            <TouchableOpacity
-              onPress={() => setShowEnd(true)}
-              activeOpacity={0.8}
-              style={styles.inputRow}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Image source={require('../assets/calendar2-range.png')} style={{ width: 14, height: 14 }} />
-                <Text style={[styles.placeholder, { marginLeft: 8 }, endDate && styles.valueText]}>{formatDate(endDate)}</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={{ height: 24 }} />
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Reason</Text>
-          <View style={styles.textAreaWrap}>
-            <TextInput
-              value={reason}
-              onChangeText={setReason}
-              placeholder="Optional"
-              placeholderTextColor="#9CA3AF"
-              style={styles.textArea}
-              multiline
-            />
-          </View>
-        </View>
-      </ScrollView>
-
-      <TouchableOpacity
-        style={styles.applyBtn}
-        activeOpacity={0.9}
-        disabled={loading}
-        onPress={async () => {
-          if (!categoryKey || !startDate || !endDate) {
-            notifyInfo('Please select category and dates.');
-            return;
-          }
-          setLoading(true);
-          try {
-            const res = await createLeaveRequest({
-              leaveType: 'PAID',
-              startDate: toIsoDate(startDate),
-              endDate: toIsoDate(endDate),
-              reason: reason?.trim() ? reason.trim() : undefined,
-              categoryKey,
-            });
-            if (res?.success) {
-              notifySuccess('Leave request submitted successfully.');
-              navigation.goBack();
-            } else {
-              notifyError(res?.message || 'Unable to submit leave request. Please try again.');
-            }
-          } catch (e) {
-            notifyError('Unable to submit leave request. Please try again.');
-          } finally {
-            setLoading(false);
-          }
-        }}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
       >
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.applyText}>Apply</Text>}
-      </TouchableOpacity>
+        <ScrollView contentContainerStyle={styles.content}>
+          <View style={styles.field}>
+            <Text style={styles.label}>Leave Category</Text>
+            <TouchableOpacity onPress={() => setShowType(true)} activeOpacity={0.8} style={styles.inputRow}>
+              <Text style={[styles.placeholder, categoryKey ? styles.valueText : null]}>
+                {categoryKey ? categoryLabel(categories.find(c => c.key === categoryKey) || { name: categoryKey, remaining: 0 }) : 'Select category'}
+              </Text>
+              <Image source={require('../assets/down.png')} style={{ width: 12, height: 12 }} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.row}>
+            <View style={[styles.field, styles.colLeft]}>
+              <Text style={styles.label}>Start Date</Text>
+              <TouchableOpacity
+                onPress={() => setShowStart(true)}
+                activeOpacity={0.8}
+                style={styles.inputRow}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Image source={require('../assets/calendar2-range.png')} style={{ width: 14, height: 14 }} />
+                  <Text style={[styles.placeholder, { marginLeft: 8 }, startDate && styles.valueText]}>{formatDate(startDate)}</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.field, styles.colRight]}>
+              <Text style={styles.label}>End Date</Text>
+              <TouchableOpacity
+                onPress={() => setShowEnd(true)}
+                activeOpacity={0.8}
+                style={styles.inputRow}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Image source={require('../assets/calendar2-range.png')} style={{ width: 14, height: 14 }} />
+                  <Text style={[styles.placeholder, { marginLeft: 8 }, endDate && styles.valueText]}>{formatDate(endDate)}</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={{ height: 24 }} />
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Reason</Text>
+            <View style={styles.textAreaWrap}>
+              <TextInput
+                value={reason}
+                onChangeText={setReason}
+                placeholder="Optional"
+                placeholderTextColor="#9CA3AF"
+                style={styles.textArea}
+                multiline
+              />
+            </View>
+          </View>
+        </ScrollView>
+
+        <TouchableOpacity
+          style={styles.applyBtn}
+          activeOpacity={0.9}
+          disabled={loading}
+          onPress={async () => {
+            if (!categoryKey || !startDate || !endDate) {
+              notifyInfo('Please select category and dates.');
+              return;
+            }
+
+            // Calculate requested days
+            const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+            const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+            const diffTime = Math.abs(end - start);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+
+            // Check balance
+            const selectedCat = categories.find(c => c.key === categoryKey);
+            if (selectedCat && diffDays > Number(selectedCat.remaining || 0)) {
+              notifyError('you dont have enough leave balance');
+              return;
+            }
+
+            setLoading(true);
+            try {
+              // Check for weekly off or holidays in range
+              const checkRes = await checkLeaveRange(toIsoDate(startDate), toIsoDate(endDate));
+              if (checkRes?.success && checkRes.conflict) {
+                setLoading(false);
+                notifyError(checkRes.message);
+                return;
+              }
+
+              const res = await createLeaveRequest({
+                leaveType: 'PAID',
+                startDate: toIsoDate(startDate),
+                endDate: toIsoDate(endDate),
+                reason: reason?.trim() ? reason.trim() : undefined,
+                categoryKey,
+              });
+              if (res?.success) {
+                notifySuccess('Leave request submitted successfully.');
+                navigation.goBack();
+              } else {
+                notifyError(res?.message || 'Unable to submit leave request. Please try again.');
+              }
+            } catch (e) {
+              notifyError('Unable to submit leave request. Please try again.');
+            } finally {
+              setLoading(false);
+            }
+          }}
+        >
+          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.applyText}>Apply</Text>}
+        </TouchableOpacity>
+      </KeyboardAvoidingView>
 
       {/* Type Picker Modal */}
       <Modal visible={showType} transparent animationType="fade" onRequestClose={() => setShowType(false)}>
-        <View style={styles.modalContainer}>
+        <View style={styles.modalContainerCenter}>
           <Pressable style={styles.modalBackdropFill} onPress={() => setShowType(false)} />
-          <View style={styles.modalSheet}>
+          <View style={styles.modalDialog}>
+            <Text style={[styles.modalTitle, { textAlign: 'center', fontSize: 16, marginBottom: 12 }]}>Select Category</Text>
             {categories.map((c) => (
               <TouchableOpacity key={c.key} style={styles.modalRow} onPress={() => { setCategoryKey(c.key); setShowType(false); }}>
                 <Text style={styles.modalText}>{categoryLabel(c)}</Text>
@@ -269,7 +303,7 @@ const styles = StyleSheet.create({
   backChevron: { fontSize: 18, color: '#125EC9', fontFamily: 'Inter_600SemiBold' },
   headerTitle: { fontSize: 18, color: '#454545', fontFamily: 'Inter_600SemiBold' },
 
-  content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 160 },
+  content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40 },
 
   row: { flexDirection: 'row', gap: 12 },
   colLeft: { flex: 1 },
@@ -288,7 +322,7 @@ const styles = StyleSheet.create({
   placeholder: { color: '#616161', fontFamily: 'Inter_400Regular', fontSize: 12 },
 
   applyBtn: {
-    position: 'absolute', left: 16, right: 16, bottom: 30,
+    marginHorizontal: 16, marginBottom: 30,
     height: 44, borderRadius: 8,
     backgroundColor: '#125EC9', alignItems: 'center', justifyContent: 'center',
     shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 6, elevation: 6,
@@ -372,5 +406,16 @@ const styles = StyleSheet.create({
     borderBottomColor: '#E6EEFF',
   },
   modalText: { color: '#1f2c3a', fontFamily: 'Inter_500Medium' },
+  modalDialog: {
+    width: '85%',
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 10,
+  },
   valueText: { color: '#1f2c3a', fontFamily: 'Inter_500Medium' },
 });

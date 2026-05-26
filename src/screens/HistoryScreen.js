@@ -114,6 +114,8 @@ export default function HistoryScreen({ navigation }) {
       Late: '#F2E8FF',
       Penalty: '#FFE2E2',
       Hours: '#E8F2FF',
+      'Check In': '#E8F5E9',
+      'Check Out': '#FFEBEE',
     };
     const bg = map[label] || '#F3F4F6';
     return { backgroundColor: bg, borderWidth: 1, borderColor: '#E6EEFF' };
@@ -137,6 +139,23 @@ export default function HistoryScreen({ navigation }) {
 
   const workDays = useMemo(() => {
     const days = Array.isArray(history?.days) ? history.days : [];
+
+    const formatTime = (isoString) => {
+      if (!isoString) return '--:--';
+      try {
+        const date = new Date(isoString);
+        if (isNaN(date.getTime())) return '--:--';
+        let hours = date.getHours();
+        const minutes = date.getMinutes();
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        hours = hours % 12;
+        hours = hours ? hours : 12;
+        const minutesStr = minutes < 10 ? '0' + minutes : minutes;
+        return `${hours}:${minutesStr} ${ampm}`;
+      } catch (e) {
+        return '--:--';
+      }
+    };
 
     const toHM = (sec) => {
       const s = Math.max(0, Number(sec || 0));
@@ -181,6 +200,13 @@ export default function HistoryScreen({ navigation }) {
         if (d.dayStatus === 'LEAVE') tokens.push({ t: 'Leave', v: d.leaveType || 'Leave' });
         if (d.dayStatus === 'HOLIDAY') tokens.push({ t: 'Holiday', v: 'Paid' });
         if (d.dayStatus === 'WEEKLY_OFF') tokens.push({ t: 'Weekly Off', v: 'Off' });
+
+        if (d.punchedInAt) {
+          tokens.push({ t: 'Check In', v: formatTime(d.punchedInAt) });
+        }
+        if (d.punchedOutAt) {
+          tokens.push({ t: 'Check Out', v: formatTime(d.punchedOutAt) });
+        }
 
         if (d.latePunchInMinutes > 0) tokens.push({ t: 'Late', v: `${d.latePunchInMinutes} min` });
         else if (d.isPenaltyDay) tokens.push({ t: 'Late', v: 'Penalty' });

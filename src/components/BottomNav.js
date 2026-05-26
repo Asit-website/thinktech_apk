@@ -7,11 +7,12 @@ export default function BottomNav({ navigation, activeKey = 'home', items }) {
   const showSales = hasPermission('sales_access');
 
   const defaultTabs = [
-    { key: 'home', label: 'Home', icon: require('../assets/tab1.png'), route: 'Home' },
+    { key: 'Attendance', label: 'Home', icon: require('../assets/tab3.png'), route: 'Attendance' },
     { key: 'sales', label: 'Sales', icon: require('../assets/tab2.png'), route: 'Sales', featureFlag: 'salesEnabled' },
-    { key: 'Attendance', label: 'Attendance', icon: require('../assets/tab3.png'), route: 'Attendance' },
     { key: 'Salary', label: 'Salary', icon: require('../assets/tab4.png'), route: 'Salary', featureFlag: 'payrollEnabled' },
-    { key: 'Profile', label: 'Profile', icon: require('../assets/person-circle.png'), route: 'Profile' },
+    { key: 'task', label: 'Task', icon: require('../assets/journal-check.png'), route: 'TodoList', featureFlag: 'taskManagementEnabled' },
+    { key: 'ai', label: 'AI', icon: require('../assets/uki.png'), route: 'AIChat', featureFlag: 'aiAssistantEnabled' },
+    { key: 'Profile', label: 'Profile', icon: require('../assets/setting2.png'), route: 'Profile' },
   ];
 
   // Filter tabs based on permissions AND subscription info
@@ -41,7 +42,7 @@ export default function BottomNav({ navigation, activeKey = 'home', items }) {
         const active = activeKey === t.key;
         return (
           <TouchableOpacity key={t.key} style={styles.item} onPress={() => onPressTab(t)} activeOpacity={0.85}>
-            <Image source={t.icon} style={{ width: 20, height: 20, opacity: active ? 1 : 0.8 }} />
+            <Image source={t.icon} style={{ width: 20, height: 20, opacity: active ? 1 : 0.8, tintColor: active ? '#FFFFFF' : '#BFD6FF' }} />
             <Text style={[styles.label, active && styles.labelActive]}>{t.label}</Text>
           </TouchableOpacity>
         );

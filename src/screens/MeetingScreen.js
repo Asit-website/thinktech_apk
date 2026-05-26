@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   SafeAreaView, View, Text, StyleSheet, TouchableOpacity,
   Image, FlatList, Modal, TextInput, ActivityIndicator,
-  ScrollView, Platform, Alert, Linking, RefreshControl
+  ScrollView, Platform, Alert, Linking, RefreshControl, KeyboardAvoidingView
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { listMyMeetings, createMeeting, updateMeeting, listAllStaff, updateMeetingStatus } from '../config/api';
@@ -403,17 +403,21 @@ export default function MeetingScreen({ navigation, route }) {
       <Modal visible={modalVisible} transparent animationType="slide">
         <View style={styles.modalBg}>
           <SafeAreaView style={styles.modalFull}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.modalCloseBtn}>
-                <Text style={styles.closeBtn}>Cancel</Text>
-              </TouchableOpacity>
-              <Text style={styles.modalHeaderTitle}>{isEditMode ? 'Edit Meeting' : 'Schedule Meeting'}</Text>
-              <TouchableOpacity onPress={handleSaveMeeting} disabled={submitting}>
-                <Text style={[styles.doneBtn, submitting && { opacity: 0.5 }]}>Done</Text>
-              </TouchableOpacity>
-            </View>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              style={{ flex: 1 }}
+            >
+              <View style={styles.modalHeader}>
+                <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.modalCloseBtn}>
+                  <Text style={styles.closeBtn}>Cancel</Text>
+                </TouchableOpacity>
+                <Text style={styles.modalHeaderTitle}>{isEditMode ? 'Edit Meeting' : 'Schedule Meeting'}</Text>
+                <TouchableOpacity onPress={handleSaveMeeting} disabled={submitting}>
+                  <Text style={[styles.doneBtn, submitting && { opacity: 0.5 }]}>Done</Text>
+                </TouchableOpacity>
+              </View>
 
-            <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
+              <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Title *</Text>
                 <TextInput
@@ -526,14 +530,18 @@ export default function MeetingScreen({ navigation, route }) {
                 ))}
               </View>
               <View style={{ height: 100 }} />
-            </ScrollView>
+              </ScrollView>
+            </KeyboardAvoidingView>
           </SafeAreaView>
         </View>
       </Modal>
 
       {/* Status Selection Modal */}
       <Modal visible={statusModalVisible} transparent animationType="fade">
-        <View style={styles.statusModalOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.statusModalOverlay}
+        >
           <View style={styles.statusModalContent}>
             <Text style={styles.statusModalTitle}>Change Meeting Status</Text>
             <View style={{ marginBottom: 20 }}>
@@ -567,7 +575,7 @@ export default function MeetingScreen({ navigation, route }) {
               <Text style={styles.statusCancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -708,7 +716,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 20 : 45,
+    paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#F3F4F6',
     backgroundColor: '#fff'

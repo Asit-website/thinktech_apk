@@ -342,7 +342,7 @@ export default function SalaryReportScreen({ navigation }) {
       style: 'currency',
       currency: 'INR',
       minimumFractionDigits: 2,
-      maximumFractionDigits: 5,
+      maximumFractionDigits: 2,
     }).format(Number(amount || 0));
   };
 

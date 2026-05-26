@@ -3,10 +3,11 @@ import { SafeAreaView, View, Text, StyleSheet, Image, TouchableOpacity, ScrollVi
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import BottomNav from '../components/BottomNav';
-import { endBreak, getAttendanceStatus, punchInWithPhoto, punchOutWithPhoto, startBreak, listMyLeaveRequests, getMyLeaveCategories } from '../config/api';
+import { endBreak, getAttendanceStatus, punchInWithPhoto, punchOutWithPhoto, startBreak, listMyLeaveRequests, getMyLeaveCategories, getMyProfile } from '../config/api';
 import { formatAddress, locationTrackingService } from '../services/locationService';
 // NOTE: Avoid static import of expo-location on web to prevent bundler crash; use dynamic import when needed
 import { notifyError, notifyInfo, notifySuccess } from '../utils/notify';
+import { syncService } from '../services/syncService';
 
 export default function AttendanceScreen({ navigation }) {
   const [status, setStatus] = useState(null);
@@ -19,6 +20,9 @@ export default function AttendanceScreen({ navigation }) {
   const [unseenCount, setUnseenCount] = useState(0);
   const [leaveBalance, setLeaveBalance] = useState(0);
   const [hasLeavePolicy, setHasLeavePolicy] = useState(false);
+  const [user, setUser] = useState(null);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const [showLocationDisclosure, setShowLocationDisclosure] = useState(false);
 
   const loadStatus = async () => {
     try {
@@ -27,9 +31,12 @@ export default function AttendanceScreen({ navigation }) {
       if (res?.success) {
         console.log('Attendance status response:', JSON.stringify(res.status, null, 2));
         setStatus(res.status);
+        await syncService.setServerStatus(res.status);
+        syncService.resetNetworkFailed();
       }
     } catch (e) {
-      // ignore
+      const local = await syncService.getLocalStatus();
+      if (local) setStatus(local);
     } finally {
       setRefreshing(false);
     }
@@ -55,9 +62,33 @@ export default function AttendanceScreen({ navigation }) {
   };
 
   useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const u = await AsyncStorage.getItem('user');
+        if (u) setUser(JSON.parse(u));
+
+        // Fetch fresh profile to ensure staffId is present
+        const res = await getMyProfile();
+        if (res?.success && res.profile) {
+          setUser(prev => ({ ...prev, staffId: res.profile.staffId }));
+        }
+      } catch (e) { }
+    };
+    loadUser();
     loadStatus();
     loadLeaveBalance();
-    const t = setInterval(loadStatus, 5000);
+
+    // Initial sync and count check
+    syncService.sync().then(() => {
+      syncService.getPendingCount().then(setPendingSyncCount);
+    });
+
+    const t = setInterval(() => {
+      loadStatus();
+      syncService.getPendingCount().then(setPendingSyncCount);
+      // Try to sync periodically if items pending
+      syncService.sync();
+    }, 10000);
     return () => clearInterval(t);
   }, []);
 
@@ -120,6 +151,7 @@ export default function AttendanceScreen({ navigation }) {
   const overtimeSeconds = Number(status?.overtimeSeconds || 0);
   const dayStatus = status?.dayStatus || 'ABSENT';
   const assignedShift = status?.assignedShift || null;
+  const isRestricted = !!status?.mobilePunchRestricted;
 
   const shiftLabel = useMemo(() => {
     if (!assignedShift) return 'Not assigned';
@@ -197,13 +229,35 @@ export default function AttendanceScreen({ navigation }) {
     return uri;
   };
 
+  const handleLocationDisclosureAgree = async () => {
+    setShowLocationDisclosure(false);
+    try {
+      console.log('Starting location tracking after user disclosure agreement...');
+      const trackingStarted = await locationTrackingService.startTracking();
+      if (trackingStarted) {
+        notifyInfo('Location tracking started for your shift (pings every 100m).');
+      } else {
+        notifyInfo('Location permission denied. Enable location access to sync movement data.');
+      }
+    } catch (e) {
+      console.error('Failed to start tracking after disclosure:', e);
+    }
+  };
+
+  const handleLocationDisclosureDeny = () => {
+    setShowLocationDisclosure(false);
+    notifyInfo('Background tracking disabled. Foreground check-ins will still work.');
+  };
+
   const onPunchIn = async () => {
     console.log('Starting punch-in process...');
-    const uri = await pickPhoto();
-    if (!uri) {
-      console.log('No photo URI returned, cancelling punch-in');
-      return;
-    }
+    const uri = null;
+    // const uri = await pickPhoto();
+    // if (!uri) {
+    //   console.log('No photo URI returned, cancelling punch-in');
+    //   return;
+    // }
+
 
     console.log('Photo URI obtained, starting punch-in API call...');
     setLoading(true);
@@ -244,15 +298,21 @@ export default function AttendanceScreen({ navigation }) {
 
         // Start location tracking after successful punch-in
         try {
-          console.log('Starting location tracking...');
-          const trackingStarted = await locationTrackingService.startTracking();
-          if (trackingStarted) {
+          console.log('Checking location tracking permissions...');
+          const Location = await import('expo-location');
+          const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
+          const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
+
+          if (fgStatus === 'granted' && bgStatus === 'granted') {
+            console.log('Permissions already granted, starting tracking...');
+            await locationTrackingService.startTracking();
             notifyInfo('Location tracking started for your shift (pings every 100m).');
           } else {
-            notifyInfo('Location permission denied. Enable location access to sync movement data.');
+            console.log('Permissions missing, showing prominent disclosure modal...');
+            setShowLocationDisclosure(true);
           }
         } catch (e) {
-          console.error('Failed to start location tracking:', e);
+          console.error('Failed to handle location tracking permission flow:', e);
         }
 
         // Show photo preview
@@ -266,7 +326,21 @@ export default function AttendanceScreen({ navigation }) {
         notifyError(res?.message || 'Punch-in failed. Please try again.');
       }
     } catch (e) {
-      notifyError(e?.response?.data?.message || 'Punch-in failed. Please try again.');
+      if (!e.response || e.message?.includes('Network') || e.code === 'ERR_NETWORK' || e.code === 'NETWORK_ERROR') {
+        const queued = await syncService.addToQueue({
+          type: 'PUNCH_IN',
+          data: { photoUri: uri, coords },
+        });
+        if (queued) {
+          notifySuccess('Punch-in recorded successfully.');
+          setPendingSyncCount(prev => prev + 1);
+          await loadStatus(); // Refresh from local cache
+        } else {
+          notifyError('Failed to save offline punch-in.');
+        }
+      } else {
+        notifyError(e?.response?.data?.message || 'Punch-in failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -274,8 +348,10 @@ export default function AttendanceScreen({ navigation }) {
 
   const onPunchOut = async () => {
     console.log('Starting punch-out process...');
-    const uri = await pickPhoto();
-    if (!uri) return;
+    const uri = null;
+    // const uri = await pickPhoto();
+    // if (!uri) return;
+
 
     setLoading(true);
     try {
@@ -325,7 +401,21 @@ export default function AttendanceScreen({ navigation }) {
         notifyError(res?.message || 'Punch-out failed. Please try again.');
       }
     } catch (e) {
-      notifyError(e?.response?.data?.message || 'Punch-out failed. Please try again.');
+      if (!e.response || e.message?.includes('Network') || e.code === 'ERR_NETWORK' || e.code === 'NETWORK_ERROR') {
+        const queued = await syncService.addToQueue({
+          type: 'PUNCH_OUT',
+          data: { photoUri: uri, coords },
+        });
+        if (queued) {
+          notifySuccess('Punch-out recorded successfully.');
+          setPendingSyncCount(prev => prev + 1);
+          await loadStatus();
+        } else {
+          notifyError('Failed to save offline punch-out.');
+        }
+      } else {
+        notifyError(e?.response?.data?.message || 'Punch-out failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -342,7 +432,17 @@ export default function AttendanceScreen({ navigation }) {
         notifyError(res?.message || 'Unable to update break status. Please try again.');
       }
     } catch (e) {
-      notifyError(e?.response?.data?.message || 'Unable to update break status. Please try again.');
+      if (!e.response || e.message?.includes('Network') || e.code === 'ERR_NETWORK' || e.code === 'NETWORK_ERROR') {
+        const type = isOnBreak ? 'END_BREAK' : 'START_BREAK';
+        const queued = await syncService.addToQueue({ type, data: {} });
+        if (queued) {
+          notifySuccess(isOnBreak ? 'Break ended successfully.' : 'Break started successfully.');
+          setPendingSyncCount(prev => prev + 1);
+          await loadStatus();
+        }
+      } else {
+        notifyError(e?.response?.data?.message || 'Unable to update break status. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -414,12 +514,24 @@ export default function AttendanceScreen({ navigation }) {
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+        {pendingSyncCount > 0 && (
+          <View style={styles.syncBanner}>
+            <ActivityIndicator size="small" color="#fff" />
+            <Text style={styles.syncText}>Syncing {pendingSyncCount} offline actions...</Text>
+          </View>
+        )}
+        {isRestricted && (
+          <View style={[styles.syncBanner, { backgroundColor: '#f5222d' }]}>
+            <Image source={require('../assets/stoke.png')} style={{ width: 14, height: 14, tintColor: '#fff', transform: [{ rotate: '45deg' }] }} />
+            <Text style={styles.syncText}>Mobile punch is currently restricted by Admin.</Text>
+          </View>
+        )}
         <View style={styles.summaryCard}>
           <View style={styles.dateHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 7, paddingVertical: 7 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 7, paddingVertical: 7, flexWrap: 'wrap' }}>
               <Image source={require('../assets/cal.png')} style={{ width: 14, height: 14, tintColor: '#ffffff' }} />
               <Text style={styles.dateText}>{dateLabel}</Text>
-              <Text style={styles.dateText}>Attendence</Text>
+              <Text style={styles.dateText}>Attendance</Text>
             </View>
           </View>
           <View style={styles.statsBox}>
@@ -427,6 +539,9 @@ export default function AttendanceScreen({ navigation }) {
               <View>
                 <Text style={styles.summaryCaption}>Total</Text>
                 <Text style={styles.summaryHeading}>Working Hours</Text>
+                {user?.staffId && (
+                  <Text style={[styles.summaryCaption, { color: '#125EC9', marginTop: 2 }]}>Staff ID: {user.staffId}</Text>
+                )}
                 {overtimeLabel ? <Text style={styles.summaryCaption}>{overtimeLabel}</Text> : null}
               </View>
               <View style={styles.summaryRight}>
@@ -483,7 +598,50 @@ export default function AttendanceScreen({ navigation }) {
           <QuickAction title="Leave" icon={require('../assets/leave1.png')} onPress={() => navigation.navigate('Leave')} />
           <QuickAction title="History" icon={require('../assets/leave2.png')} onPress={() => navigation.navigate('History')} />
           <QuickAction title="Calendar" icon={require('../assets/leave3.png')} onPress={() => navigation.navigate('Calendar')} />
-          {/* <QuickAction title="More" icon={require('../assets/currency-rupee.png')} /> */}
+          <QuickAction title="QR Punch" icon={require('../assets/tab1.png')} onPress={() => {
+            if (status?.qrPunchRestricted) {
+              if (Platform.OS === 'web') {
+                alert("This feature is disabled for you by your organization");
+              } else {
+                Alert.alert("Feature Disabled", "This feature is disabled for you by your organization");
+              }
+            } else if (status?.isQrZoneAssigned === false) {
+              if (Platform.OS === 'web') {
+                alert("You are not assigned to QR attendance.");
+              } else {
+                Alert.alert("Access Denied", "You are not assigned to QR attendance.");
+              }
+            } else {
+              const shouldPromptForPunchOut = () => {
+                if (status?.punchedInAt && !status?.punchedOutAt) {
+                  const punchInTime = new Date(status.punchedInAt).getTime();
+                  const now = new Date().getTime();
+                  const diffHours = (now - punchInTime) / (1000 * 60 * 60);
+                  return diffHours >= 0 && diffHours < 3;
+                }
+                return false;
+              };
+
+              if (shouldPromptForPunchOut()) {
+                if (Platform.OS === 'web') {
+                  if (window.confirm("Do you Really want to scan ? it will punch out .")) {
+                    navigation.navigate('QRScanner');
+                  }
+                } else {
+                  Alert.alert(
+                    "Confirm Punch Out",
+                    "Do you Really want to scan ? it will punch out .",
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      { text: "OK", onPress: () => navigation.navigate('QRScanner') }
+                    ]
+                  );
+                }
+              } else {
+                navigation.navigate('QRScanner');
+              }
+            }
+          }} />
         </View>
 
         <View style={styles.activityWrap}>
@@ -523,11 +681,11 @@ export default function AttendanceScreen({ navigation }) {
       </ScrollView>
 
       <View style={styles.footerActions}>
-        <TouchableOpacity style={[styles.btnDanger, !canPunchOut ? styles.btnDisabled : null]} onPress={onPunchOut} disabled={!canPunchOut || loading}>
-          {loading && canPunchOut ? <ActivityIndicator color="#fff" /> : <Text style={[styles.btnDangerText, !canPunchOut ? styles.btnDisabledText : null]}>Punch out</Text>}
+        <TouchableOpacity style={[styles.btnDanger, (!canPunchOut || isRestricted) ? styles.btnDisabled : null]} onPress={onPunchOut} disabled={!canPunchOut || isRestricted || loading}>
+          {loading && canPunchOut ? <ActivityIndicator color="#fff" /> : <Text style={[styles.btnDangerText, (!canPunchOut || isRestricted) ? styles.btnDisabledText : null]}>Punch out</Text>}
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.btnDisabled, canPunchIn ? styles.btnPrimary : null]} onPress={onPunchIn} disabled={!canPunchIn || loading}>
-          {loading && canPunchIn ? <ActivityIndicator color="#fff" /> : <Text style={[styles.btnDisabledText, canPunchIn ? styles.btnPrimaryText : null]}>Punch in</Text>}
+        <TouchableOpacity style={[styles.btnDisabled, (canPunchIn && !isRestricted) ? styles.btnPrimary : null]} onPress={onPunchIn} disabled={!canPunchIn || isRestricted || loading}>
+          {loading && canPunchIn ? <ActivityIndicator color="#fff" /> : <Text style={[styles.btnDisabledText, (canPunchIn && !isRestricted) ? styles.btnPrimaryText : null]}>Punch in</Text>}
         </TouchableOpacity>
       </View>
 
@@ -538,7 +696,7 @@ export default function AttendanceScreen({ navigation }) {
             <Text style={styles.timeoutValue}>{timeoutLabel}</Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.timeoutIconChip} activeOpacity={0.85} onPress={onToggleBreak} disabled={!status?.punchedInAt || !!status?.punchedOutAt || loading}>
+        <TouchableOpacity style={styles.timeoutIconChip} activeOpacity={0.85} onPress={onToggleBreak} disabled={!status?.punchedInAt || !!status?.punchedOutAt || isRestricted || loading}>
           <Image source={require('../assets/cup-hot.png')} style={{ width: 20, height: 20, tintColor: '#ffffff' }} />
         </TouchableOpacity>
       </View>
@@ -591,6 +749,74 @@ export default function AttendanceScreen({ navigation }) {
           </View>
         </View>
       </Modal>
+
+      {/* Prominent Background Location Disclosure Modal */}
+      <Modal
+        visible={showLocationDisclosure}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLocationDisclosure(false)}
+      >
+        <View style={styles.disclosureBackdrop}>
+          <View style={styles.disclosureCard}>
+            <View style={styles.disclosureIconContainer}>
+              <Image
+                source={require('../assets/desti.png')}
+                style={styles.disclosureIcon}
+              />
+            </View>
+            <Text style={styles.disclosureTitle}>Background Location Access</Text>
+            
+            <ScrollView style={styles.disclosureScroll} showsVerticalScrollIndicator={false}>
+              <Text style={styles.disclosureText}>
+                <Text style={{ fontWeight: 'bold', color: '#1E293B' }}>Vetansutra</Text> collects location data to enable:
+              </Text>
+              
+              <View style={styles.disclosureBullet}>
+                <Text style={styles.disclosureBulletIcon}>📍</Text>
+                <Text style={styles.disclosureBulletText}>
+                  <Text style={{ fontWeight: '600', color: '#0F172A' }}>Shift Attendance Tracking:</Text> Automatically track and calculate your working hours and overtime during active shifts.
+                </Text>
+              </View>
+
+              <View style={styles.disclosureBullet}>
+                <Text style={styles.disclosureBulletIcon}>🗺️</Text>
+                <Text style={styles.disclosureBulletText}>
+                  <Text style={{ fontWeight: '600', color: '#0F172A' }}>Check-in Verification:</Text> Validate employee check-ins and client visits seamlessly.
+                </Text>
+              </View>
+
+              <View style={styles.disclosureBullet}>
+                <Text style={styles.disclosureBulletIcon}>⏱️</Text>
+                <Text style={styles.disclosureBulletText}>
+                  <Text style={{ fontWeight: '600', color: '#0F172A' }}>Automatic Background Sync:</Text> Keep tracking active <Text style={{ fontWeight: 'bold', color: '#125EC9' }}>even when the app is closed or not in use</Text>.
+                </Text>
+              </View>
+
+              <Text style={styles.disclosureWarning}>
+                To enable background logging, please choose "Allow all the time" in the system settings dialog that follows. You can disable this tracking at any time by punching out.
+              </Text>
+            </ScrollView>
+
+            <View style={styles.disclosureActions}>
+              <TouchableOpacity
+                style={styles.disclosureDenyBtn}
+                onPress={handleLocationDisclosureDeny}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.disclosureDenyText}>Deny</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.disclosureAgreeBtn}
+                onPress={handleLocationDisclosureAgree}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.disclosureAgreeText}>Agree & Continue</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -615,6 +841,23 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: '#ffffff',
+  },
+  syncBanner: {
+    backgroundColor: '#faad14',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 10,
+    marginTop: 10
+  },
+  syncText: {
+    color: '#fff',
+    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
   },
   // Notifications slide-over styles
   notifBackdrop: {
@@ -1122,4 +1365,119 @@ const styles = StyleSheet.create({
   previewCloseText: { color: '#fff', fontSize: 16, fontFamily: 'Inter_600SemiBold' },
   notifApproved: { color: '#065F46' },
   notifRejected: { color: '#B91C1C' },
+  disclosureBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  disclosureCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 24,
+    width: '100%',
+    maxWidth: 340,
+    maxHeight: '80%',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
+    alignItems: 'center',
+  },
+  disclosureIconContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  disclosureIcon: {
+    width: 32,
+    height: 32,
+    tintColor: '#125EC9',
+  },
+  disclosureTitle: {
+    fontSize: 18,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#0F172A',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  disclosureScroll: {
+    width: '100%',
+    marginBottom: 20,
+  },
+  disclosureText: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: '#475569',
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  disclosureBullet: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+    paddingRight: 8,
+  },
+  disclosureBulletIcon: {
+    fontSize: 14,
+    marginRight: 8,
+    marginTop: 2,
+  },
+  disclosureBulletText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    color: '#334155',
+    lineHeight: 18,
+  },
+  disclosureWarning: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+    color: '#64748B',
+    lineHeight: 16,
+    marginTop: 12,
+    fontStyle: 'italic',
+  },
+  disclosureActions: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    paddingTop: 16,
+  },
+  disclosureDenyBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  disclosureDenyText: {
+    color: '#64748B',
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  disclosureAgreeBtn: {
+    flex: 2,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#125EC9',
+  },
+  disclosureAgreeText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+  },
 });

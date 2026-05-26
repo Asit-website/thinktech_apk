@@ -105,6 +105,33 @@ export async function sendLocationPing(latitude, longitude, accuracy, source = '
     return resp.data;
   } catch (error) {
     console.error('Location ping error:', error);
+    
+    // Save to offline queue if it is a network error
+    const isNetworkError = !error.response || error.code === 'ERR_NETWORK' || error.message?.includes('Network');
+    if (isNetworkError) {
+      try {
+        const queueJson = await AsyncStorage.getItem('offline_location_pings');
+        const queue = queueJson ? JSON.parse(queueJson) : [];
+        const deviceId = await getOrCreateDeviceTrackId();
+        
+        queue.push({
+          lat: latitude,
+          lng: longitude,
+          accuracyMeters: typeof accuracy === 'number' ? Math.round(accuracy) : undefined,
+          source,
+          address: address || undefined,
+          deviceId,
+          platform: Platform.OS,
+          timestamp: new Date().toISOString()
+        });
+        
+        await AsyncStorage.setItem('offline_location_pings', JSON.stringify(queue));
+        console.log('Saved offline background location ping. Queued items count:', queue.length);
+      } catch (storageError) {
+        console.error('Failed to save offline location ping to AsyncStorage:', storageError);
+      }
+    }
+    
     throw error;
   }
 }

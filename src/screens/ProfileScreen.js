@@ -3,7 +3,7 @@ import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ScrollVi
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import BottomNav from '../components/BottomNav';
-import { getMyProfile, updateMyProfile, uploadMyProfilePhoto, listMyLeaveRequests } from '../config/api';
+import { getMyProfile, updateMyProfile, uploadMyProfilePhoto, listMyLeaveRequests, getAttendanceStatus } from '../config/api';
 import { notifyError, notifyInfo, notifySuccess } from '../utils/notify';
 
 export default function ProfileScreen({ navigation }) {
@@ -14,6 +14,10 @@ export default function ProfileScreen({ navigation }) {
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifLeaves, setNotifLeaves] = useState([]); // APPROVED + REJECTED
   const [unseenCount, setUnseenCount] = useState(0);
+  const [qrPunchRestricted, setQrPunchRestricted] = useState(false);
+  const [isQrZoneAssigned, setIsQrZoneAssigned] = useState(true);
+  const [punchedInAt, setPunchedInAt] = useState(null);
+  const [punchedOutAt, setPunchedOutAt] = useState(null);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -55,6 +59,29 @@ export default function ProfileScreen({ navigation }) {
 
   useEffect(() => {
     load();
+    const fetchQrStatus = async () => {
+      try {
+        const res = await getAttendanceStatus();
+        if (res?.success) {
+          setQrPunchRestricted(!!res.status?.qrPunchRestricted);
+          setIsQrZoneAssigned(res.status?.isQrZoneAssigned !== false);
+          setPunchedInAt(res.status?.punchedInAt || null);
+          setPunchedOutAt(res.status?.punchedOutAt || null);
+        }
+      } catch (e) {
+        try {
+          const statusJson = await AsyncStorage.getItem('offline_attendance_status');
+          if (statusJson) {
+            const local = JSON.parse(statusJson);
+            setQrPunchRestricted(!!local?.qrPunchRestricted);
+            setIsQrZoneAssigned(local?.isQrZoneAssigned !== false);
+            setPunchedInAt(local?.punchedInAt || null);
+            setPunchedOutAt(local?.punchedOutAt || null);
+          }
+        } catch (_) {}
+      }
+    };
+    fetchQrStatus();
   }, []);
 
   // Notifications polling and badge count (approved + rejected total)
@@ -252,6 +279,54 @@ export default function ProfileScreen({ navigation }) {
 
         {/* List Section */}
         <View style={styles.list}>
+          <TouchableOpacity style={styles.listItem} activeOpacity={0.8} onPress={() => {
+            if (qrPunchRestricted) {
+              if (Platform.OS === 'web') {
+                alert("This feature is disabled for you by your organization");
+              } else {
+                Alert.alert("Feature Disabled", "This feature is disabled for you by your organization");
+              }
+            } else if (isQrZoneAssigned === false) {
+              if (Platform.OS === 'web') {
+                alert("You are not assigned to QR attendance.");
+              } else {
+                Alert.alert("Access Denied", "You are not assigned to QR attendance.");
+              }
+            } else {
+              const shouldPromptForPunchOut = () => {
+                if (punchedInAt && !punchedOutAt) {
+                  const punchInTime = new Date(punchedInAt).getTime();
+                  const now = new Date().getTime();
+                  const diffHours = (now - punchInTime) / (1000 * 60 * 60);
+                  return diffHours >= 0 && diffHours < 3;
+                }
+                return false;
+              };
+
+              if (shouldPromptForPunchOut()) {
+                if (Platform.OS === 'web') {
+                  if (window.confirm("Do you Really want to scan ? it will punch out .")) {
+                    navigation.navigate('QRScanner');
+                  }
+                } else {
+                  Alert.alert(
+                    "Confirm Punch Out",
+                    "Do you Really want to scan ? it will punch out .",
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      { text: "OK", onPress: () => navigation.navigate('QRScanner') }
+                    ]
+                  );
+                }
+              } else {
+                navigation.navigate('QRScanner');
+              }
+            }
+          }}>
+            <Text style={styles.listText}>QR Attendance</Text>
+            <Image source={require('../assets/pie.png')} style={{ width: 12, height: 12 }} />
+          </TouchableOpacity>
+          <View style={styles.listDivider} />
           <TouchableOpacity style={styles.listItem} activeOpacity={0.8} onPress={() => navigation.navigate('MyDocuments')}>
             <Text style={styles.listText}>My Document</Text>
             <Image source={require('../assets/pie.png')} style={{ width: 12, height: 12 }} />

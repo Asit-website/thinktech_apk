@@ -1,8 +1,8 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Image, TextInput, Platform, Alert, Modal, Pressable, ActivityIndicator } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import { View, Text, ScrollView, TouchableOpacity, Image, TextInput, Platform, Alert, Modal, Pressable, ActivityIndicator, KeyboardAvoidingView } from 'react-native';
+import CustomDateTimePicker from '../components/CustomDateTimePicker';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { getAssignedJobDetail, listMyAssignedJobs, submitOrder, listOrderProducts } from '../config/api';
+import { getAssignedJobDetail, listMyAssignedJobs, listMyClients, submitOrder, listOrderProducts } from '../config/api';
 import { notifySuccess, notifyError } from '../utils/notify';
 import { formatAddress } from '../services/locationService';
 
@@ -24,6 +24,7 @@ export default function OrderFormScreen() {
   const [loadingMaster, setLoadingMaster] = useState(false);
   const [productSearch, setProductSearch] = useState('');
   const [showMasterModal, setShowMasterModal] = useState(false);
+  const [showPhoneError, setShowPhoneError] = useState(false);
 
   // Client selection / source
   const assignedJobId = route.params?.assignedJobId ? Number(route.params.assignedJobId) : null;
@@ -243,14 +244,14 @@ export default function OrderFormScreen() {
     try {
       setLoadingClients(true);
       setClientPickerVisible(true);
-      const res = await listMyAssignedJobs();
-      const rows = Array.isArray(res?.jobs) ? res.jobs : [];
-      const opts = rows.map((r) => ({
-        id: r.client?.id || null,
-        name: r.client?.name || 'Client',
-        phone: r.client?.phone || '',
-        clientType: r.client?.clientType || '',
-        location: r.client?.location || '',
+      const res = await listMyClients();
+      const rows = Array.isArray(res?.clients) ? res.clients : [];
+      const opts = rows.map((c) => ({
+        id: c.id || null,
+        name: c.name || 'Client',
+        phone: c.phone || '',
+        clientType: c.clientType || '',
+        location: c.location || '',
       })).filter((c) => c.id);
       setClientOptions(opts);
     } catch (_) { }
@@ -362,200 +363,227 @@ export default function OrderFormScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 160 }}>
-        <Text style={{ color: '#6B7280', fontFamily: 'Inter_400Regular', fontSize: 12, lineHeight: 20, marginBottom: 12 }}>
-          Create or update customer order details and attach proof.
-        </Text>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 160 }}>
+          <Text style={{ color: '#6B7280', fontFamily: 'Inter_400Regular', fontSize: 12, lineHeight: 20, marginBottom: 12 }}>
+            Create or update customer order details and attach proof.
+          </Text>
 
-        <View style={{ backgroundColor: '#fff', padding: 12, marginBottom: 12 }}>
-          <View style={{ marginBottom: 10 }}>
-            <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginBottom: 6 }}>Client name <Text style={{ color: '#EF4444' }}>*</Text></Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: 8, borderWidth: 1, borderColor: '#E6EEFF', paddingVertical: 13, paddingHorizontal: 12 }}>
-              <Image source={require('../assets/uki.png')} style={{ width: 14, height: 14, marginRight: 8 }} />
-              <TextInput value={clientName} onChangeText={setClientName} editable={!assignedJobId} placeholder="Enter client name" placeholderTextColor="#9CA3AF" style={{ flex: 1, color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12, outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' }} />
-              {!assignedJobId ? (
-                <TouchableOpacity onPress={openClientPicker} style={{ marginLeft: 8, backgroundColor: '#E0ECFF', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6 }}>
-                  <Text style={{ color: '#1D4ED8', fontFamily: 'Inter_500Medium', fontSize: 11 }}>Pick</Text>
-                </TouchableOpacity>
-              ) : null}
+          <View style={{ backgroundColor: '#fff', padding: 12, marginBottom: 12 }}>
+            <View style={{ marginBottom: 10 }}>
+              <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginBottom: 6 }}>Client name <Text style={{ color: '#EF4444' }}>*</Text></Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: 8, borderWidth: 1, borderColor: '#E6EEFF', paddingVertical: 13, paddingHorizontal: 12 }}>
+                <Image source={require('../assets/uki.png')} style={{ width: 14, height: 14, marginRight: 8 }} />
+                <TextInput value={clientName} onChangeText={setClientName} editable={!assignedJobId} placeholder="Enter client name" placeholderTextColor="#9CA3AF" style={{ flex: 1, color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12, outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' }} />
+                {!assignedJobId ? (
+                  <TouchableOpacity onPress={openClientPicker} style={{ marginLeft: 8, backgroundColor: '#E0ECFF', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6 }}>
+                    <Text style={{ color: '#1D4ED8', fontFamily: 'Inter_500Medium', fontSize: 11 }}>Pick</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
             </View>
-          </View>
-          <View style={{ marginBottom: 10 }}>
-            <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginBottom: 6 }}>Phone number</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: 8, borderWidth: 1, borderColor: '#E6EEFF', paddingVertical: 13, paddingHorizontal: 12 }}>
-              <Image source={require('../assets/telephone.png')} style={{ width: 14, height: 14, marginRight: 8 }} />
-              <TextInput value={phone} onChangeText={setPhone} editable={!assignedJobId} placeholder="Enter phone" keyboardType="phone-pad" placeholderTextColor="#9CA3AF" style={{ flex: 1, color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12, outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' }} />
+            <View style={{ marginBottom: 10 }}>
+              <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginBottom: 6 }}>Phone number</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: 8, borderWidth: 1, borderColor: '#E6EEFF', paddingVertical: 13, paddingHorizontal: 12 }}>
+                <Image source={require('../assets/telephone.png')} style={{ width: 14, height: 14, marginRight: 8 }} />
+                <TextInput
+                  value={phone}
+                  onChangeText={(val) => {
+                    const cleaned = val.replace(/[^0-9]/g, '');
+                    if (cleaned.length > 10) {
+                      setShowPhoneError(true);
+                    } else {
+                      setShowPhoneError(false);
+                      setPhone(cleaned);
+                    }
+                  }}
+                  editable={!assignedJobId}
+                  placeholder="Enter phone"
+                  keyboardType="phone-pad"
+                  maxLength={11}
+                  placeholderTextColor="#9CA3AF"
+                  style={{ flex: 1, color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12, outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' }}
+                />
+              </View>
+              {showPhoneError && (
+                <Text style={{ color: '#F24E43', fontSize: 10, marginTop: 4, fontFamily: 'Inter_500Medium' }}>
+                  cant be more than 10 digit
+                </Text>
+              )}
             </View>
+
           </View>
 
-        </View>
-
-        {/* Order date and time */}
-        <View style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', padding: 12, marginBottom: 12 }}>
-          <Text style={{ color: '#1F2937', fontFamily: 'Inter_600SemiBold', fontSize: 12, marginBottom: 8 }}>Order date and time</Text>
-          <TouchableOpacity onPress={() => setShowDate(true)} style={{ backgroundColor: '#F3F4F6', borderRadius: 8, borderWidth: 1, borderColor: '#E6EEFF', paddingHorizontal: 12, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>{fmtDateLine(orderDate)}</Text>
-            <Image source={require('../assets/calendar2-range.png')} style={{ width: 16, height: 16 }} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Product Info */}
-        <View style={{ backgroundColor: '#FFFFFF', padding: 12, marginBottom: 12 }}>
-          <Text style={{ color: '#1F2937', fontFamily: 'Inter_600SemiBold', fontSize: 12, marginBottom: 10 }}>Products info</Text>
-
-          {/* Master Product Selection Section */}
-          <View style={{ marginBottom: 16 }}>
-            <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 11, marginBottom: 6 }}>Select Product from Master List</Text>
-            <TouchableOpacity
-              onPress={() => setShowMasterModal(true)}
-              style={{
-                backgroundColor: '#F3F4F6',
-                borderRadius: 8,
-                borderWidth: 1,
-                borderColor: '#E6EEFF',
-                paddingVertical: 13,
-                paddingHorizontal: 12,
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}
-            >
-              <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>
-                {loadingMaster ? 'Loading master products...' : 'Tap here to choose product from list'}
-              </Text>
-              <Image source={require('../assets/uki.png')} style={{ width: 14, height: 14, tintColor: '#125EC9' }} />
+          {/* Order date and time */}
+          <View style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', padding: 12, marginBottom: 12 }}>
+            <Text style={{ color: '#1F2937', fontFamily: 'Inter_600SemiBold', fontSize: 12, marginBottom: 8 }}>Order date and time</Text>
+            <TouchableOpacity onPress={() => setShowDate(true)} style={{ backgroundColor: '#F3F4F6', borderRadius: 8, borderWidth: 1, borderColor: '#E6EEFF', paddingHorizontal: 12, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>{fmtDateLine(orderDate)}</Text>
+              <Image source={require('../assets/calendar2-range.png')} style={{ width: 16, height: 16 }} />
             </TouchableOpacity>
           </View>
 
-          {products.length === 0 ? (
-            <View style={{ paddingVertical: 12 }}>
-              <Text style={{ color: '#6B7280', fontFamily: 'Inter_400Regular', fontSize: 12, marginBottom: 10 }}>No products added to this order.</Text>
-              <View style={{ alignItems: 'flex-start' }}>
+          {/* Product Info */}
+          <View style={{ backgroundColor: '#FFFFFF', padding: 12, marginBottom: 12 }}>
+            <Text style={{ color: '#1F2937', fontFamily: 'Inter_600SemiBold', fontSize: 12, marginBottom: 10 }}>Products info</Text>
+
+            {/* Master Product Selection Section */}
+            <View style={{ marginBottom: 16 }}>
+              <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 11, marginBottom: 6 }}>Select Product from Master List</Text>
+              <TouchableOpacity
+                onPress={() => setShowMasterModal(true)}
+                style={{
+                  backgroundColor: '#F3F4F6',
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: '#E6EEFF',
+                  paddingVertical: 13,
+                  paddingHorizontal: 12,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}
+              >
+                <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>
+                  {loadingMaster ? 'Loading master products...' : 'Tap here to choose product from list'}
+                </Text>
+                <Image source={require('../assets/uki.png')} style={{ width: 14, height: 14, tintColor: '#125EC9' }} />
+              </TouchableOpacity>
+            </View>
+
+            {products.length === 0 ? (
+              <View style={{ paddingVertical: 12 }}>
+                <Text style={{ color: '#6B7280', fontFamily: 'Inter_400Regular', fontSize: 12, marginBottom: 10 }}>No products added to this order.</Text>
+                <View style={{ alignItems: 'flex-start' }}>
+                  <TouchableOpacity onPress={addProduct} style={{ backgroundColor: '#125EC9', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6 }}>
+                    <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_400Regular', fontSize: 12 }}>+ Add Manual Product</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={{ alignItems: 'flex-end', marginBottom: 10 }}>
                 <TouchableOpacity onPress={addProduct} style={{ backgroundColor: '#125EC9', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6 }}>
                   <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_400Regular', fontSize: 12 }}>+ Add Manual Product</Text>
                 </TouchableOpacity>
               </View>
-            </View>
-          ) : (
-            <View style={{ alignItems: 'flex-end', marginBottom: 10 }}>
-              <TouchableOpacity onPress={addProduct} style={{ backgroundColor: '#125EC9', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6 }}>
-                <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_400Regular', fontSize: 12 }}>+ Add Manual Product</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {products.map((p) => {
-            const amount = (Number(p.qty) || 0) * (Number(p.price) || 0);
-            return (
-              <View key={p.id} style={{ borderTopWidth: 1, borderColor: '#E5E7EB', paddingTop: 10, marginTop: 8 }}>
-                {/* Header: icon + name on left, Value label on right */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Image source={require('../assets/seam.png')} style={{ width: 16, height: 16, marginRight: 6 }} />
-                    <Text style={{ color: '#111827', fontFamily: 'Inter_600SemiBold', fontSize: 12 }}>{p.name}</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => removeProduct(p.id)} style={{ paddingHorizontal: 4 }}>
-                    <Text style={{ color: '#DC2626', fontFamily: 'Inter_500Medium', fontSize: 11 }}>Remove</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Rows: label left, value right */}
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, marginTop: 20 }}>
-                  <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>Product size</Text>
-                  <Text style={{ color: '#454545', fontFamily: 'Inter_400Medium', fontSize: 12, minWidth: 80, textAlign: 'right' }}>{p.size}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 }}>
-                  <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>Product qty</Text>
-                  <Text style={{ color: '#454545', fontFamily: 'Inter_400Medium', fontSize: 12, minWidth: 80, textAlign: 'right' }}>{p.qty}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-                  <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>Product rate</Text>
-                  <Text style={{ color: '#454545', fontFamily: 'Inter_400Medium', fontSize: 12, textAlign: 'right' }}>₹ {p.price}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-                  <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>Product amount</Text>
-                  <Text style={{ color: '#454545', fontFamily: 'Inter_400SemiBold', fontSize: 12, minWidth: 80, textAlign: 'right' }}>₹ {amount}</Text>
-                </View>
-                <View style={{ alignItems: 'flex-end', marginTop: 4 }}>
-                  <TouchableOpacity onPress={addProduct} style={{ backgroundColor: '#125EC9', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6 }}>
-                    <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_400Regular', fontSize: 10 }}>+ Add Product</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            );
-          })}
-        </View>
-
-        {/* Totals (divider only, not boxed) */}
-        <View style={{ backgroundColor: '#FFFFFF', borderTopWidth: 1, borderColor: '#E5E7EB', paddingTop: 10, paddingHorizontal: 12, paddingBottom: 8, marginBottom: 12 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-            <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>Net amount :</Text>
-            <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>₹ {totals.net}</Text>
-          </View>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-            <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>GST (18%) :</Text>
-            <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>₹ {totals.gst}</Text>
-          </View>
-          <View style={{ height: 1, backgroundColor: '#E5E7EB', marginVertical: 6 }} />
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>Total amount :</Text>
-            <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>₹ {totals.total}</Text>
-          </View>
-        </View>
-
-
-        <View style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', padding: 12, marginBottom: 12 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-            <Text style={{ color: '#1F2937', fontFamily: 'Inter_600SemiBold', fontSize: 12 }}>Payment method :</Text>
-            <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginLeft: 6 }}>{paymentMethod}</Text>
-          </View>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            {['Cash', 'Online', 'Cheque'].map((m) => (
-              <TouchableOpacity key={m} onPress={() => setPaymentMethod(m)} style={{ backgroundColor: paymentMethod === m ? '#E0ECFF' : '#F3F4F6', borderColor: paymentMethod === m ? '#E0ECFF' : '#F3F4F6', borderWidth: 1, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6 }}>
-                <Text style={{ color: paymentMethod === m ? '#1D4ED8' : '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 11 }}>{m}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
-        <View style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', padding: 12, marginBottom: 12 }}>
-          <Text style={{ color: '#1F2937', fontFamily: 'Inter_600SemiBold', fontSize: 12, marginBottom: 8 }}>Remarks.</Text>
-          <TextInput value={remarks} onChangeText={setRemarks} placeholder="Type here..." placeholderTextColor="#9CA3AF" multiline style={{ minHeight: 110, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E6EEFF', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, textAlignVertical: 'top', color: '#111827', outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' }} />
-        </View>
-
-        <View style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', padding: 12, marginBottom: 12 }}>
-          <Text style={{ color: '#1F2937', fontFamily: 'Inter_600SemiBold', fontSize: 12, marginBottom: 8 }}>Upload proof</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {/* Left square preview */}
-            <View style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E6EEFF', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-              {(() => {
-                const isImg = !!proof && ((proof.type && proof.type.startsWith('image/')) || /\.(png|jpg|jpeg|webp|gif)$/i.test(String(proof.name || proof.uri || '')));
-                if (isImg) {
-                  return <Image source={{ uri: proof.uri }} style={{ width: 32, height: 32, borderRadius: 6 }} />;
-                }
-                return <Image source={require('../assets/upload.png')} style={{ width: 16, height: 16, tintColor: '#6B7280' }} />;
-              })()}
-              {proof ? (
-                <TouchableOpacity onPress={() => setProof(null)} style={{ position: 'absolute', top: -6, right: -6, backgroundColor: '#DC2626', borderRadius: 10, paddingHorizontal: 4, paddingVertical: 2 }}>
-                  <Text style={{ color: '#fff', fontSize: 10 }}>×</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-            {/* Upload button */}
-            <TouchableOpacity onPress={onUploadProof} style={{ backgroundColor: '#125ec9', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}>
-              <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_600SemiBold', fontSize: 12 }}>{proof ? 'Replace proof' : 'Upload proof'}</Text>
-            </TouchableOpacity>
-            {/* File name inline (optional) */}
-            {!!proof?.name && (
-              <Text numberOfLines={1} style={{ flexShrink: 1, color: '#1F2937', fontFamily: 'Inter_500Medium', fontSize: 12 }}>{proof.name}</Text>
             )}
-          </View>
-        </View>
 
-        <TouchableOpacity onPress={onSubmit} disabled={submitting} style={{ backgroundColor: '#125ec9', paddingVertical: 14, borderRadius: 8, alignItems: 'center', opacity: submitting ? 0.7 : 1 }}>
-          {submitting ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold', fontSize: 14 }}>Submit</Text>}
-        </TouchableOpacity>
-      </ScrollView>
+            {products.map((p) => {
+              const amount = (Number(p.qty) || 0) * (Number(p.price) || 0);
+              return (
+                <View key={p.id} style={{ borderTopWidth: 1, borderColor: '#E5E7EB', paddingTop: 10, marginTop: 8 }}>
+                  {/* Header: icon + name on left, Value label on right */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Image source={require('../assets/seam.png')} style={{ width: 16, height: 16, marginRight: 6 }} />
+                      <Text style={{ color: '#111827', fontFamily: 'Inter_600SemiBold', fontSize: 12 }}>{p.name}</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => removeProduct(p.id)} style={{ paddingHorizontal: 4 }}>
+                      <Text style={{ color: '#DC2626', fontFamily: 'Inter_500Medium', fontSize: 11 }}>Remove</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Rows: label left, value right */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15, marginTop: 20 }}>
+                    <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>Product size</Text>
+                    <Text style={{ color: '#454545', fontFamily: 'Inter_400Medium', fontSize: 12, minWidth: 80, textAlign: 'right' }}>{p.size}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 }}>
+                    <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>Product qty</Text>
+                    <Text style={{ color: '#454545', fontFamily: 'Inter_400Medium', fontSize: 12, minWidth: 80, textAlign: 'right' }}>{p.qty}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                    <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>Product rate</Text>
+                    <Text style={{ color: '#454545', fontFamily: 'Inter_400Medium', fontSize: 12, textAlign: 'right' }}>₹ {p.price}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                    <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>Product amount</Text>
+                    <Text style={{ color: '#454545', fontFamily: 'Inter_400SemiBold', fontSize: 12, minWidth: 80, textAlign: 'right' }}>₹ {amount}</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end', marginTop: 4 }}>
+                    <TouchableOpacity onPress={addProduct} style={{ backgroundColor: '#125EC9', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6 }}>
+                      <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_400Regular', fontSize: 10 }}>+ Add Product</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+
+          {/* Totals (divider only, not boxed) */}
+          <View style={{ backgroundColor: '#FFFFFF', borderTopWidth: 1, borderColor: '#E5E7EB', paddingTop: 10, paddingHorizontal: 12, paddingBottom: 8, marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+              <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>Net amount :</Text>
+              <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>₹ {totals.net}</Text>
+            </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+              <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>GST (18%) :</Text>
+              <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>₹ {totals.gst}</Text>
+            </View>
+            <View style={{ height: 1, backgroundColor: '#E5E7EB', marginVertical: 6 }} />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>Total amount :</Text>
+              <Text style={{ color: '#454545', fontFamily: 'Inter_400Regular', fontSize: 12 }}>₹ {totals.total}</Text>
+            </View>
+          </View>
+
+
+          <View style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', padding: 12, marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+              <Text style={{ color: '#1F2937', fontFamily: 'Inter_600SemiBold', fontSize: 12 }}>Payment method :</Text>
+              <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginLeft: 6 }}>{paymentMethod}</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {['Cash', 'Online', 'Cheque'].map((m) => (
+                <TouchableOpacity key={m} onPress={() => setPaymentMethod(m)} style={{ backgroundColor: paymentMethod === m ? '#E0ECFF' : '#F3F4F6', borderColor: paymentMethod === m ? '#E0ECFF' : '#F3F4F6', borderWidth: 1, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6 }}>
+                  <Text style={{ color: paymentMethod === m ? '#1D4ED8' : '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 11 }}>{m}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <View style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', padding: 12, marginBottom: 12 }}>
+            <Text style={{ color: '#1F2937', fontFamily: 'Inter_600SemiBold', fontSize: 12, marginBottom: 8 }}>Remarks.</Text>
+            <TextInput value={remarks} onChangeText={setRemarks} placeholder="Type here..." placeholderTextColor="#9CA3AF" multiline style={{ minHeight: 110, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E6EEFF', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, textAlignVertical: 'top', color: '#111827', outlineStyle: 'none', outlineWidth: 0, outlineColor: 'transparent' }} />
+          </View>
+
+          <View style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', padding: 12, marginBottom: 12 }}>
+            <Text style={{ color: '#1F2937', fontFamily: 'Inter_600SemiBold', fontSize: 12, marginBottom: 8 }}>Upload proof</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {/* Left square preview */}
+              <View style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E6EEFF', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+                {(() => {
+                  const isImg = !!proof && ((proof.type && proof.type.startsWith('image/')) || /\.(png|jpg|jpeg|webp|gif)$/i.test(String(proof.name || proof.uri || '')));
+                  if (isImg) {
+                    return <Image source={{ uri: proof.uri }} style={{ width: 32, height: 32, borderRadius: 6 }} />;
+                  }
+                  return <Image source={require('../assets/upload.png')} style={{ width: 16, height: 16, tintColor: '#6B7280' }} />;
+                })()}
+                {proof ? (
+                  <TouchableOpacity onPress={() => setProof(null)} style={{ position: 'absolute', top: -6, right: -6, backgroundColor: '#DC2626', borderRadius: 10, paddingHorizontal: 4, paddingVertical: 2 }}>
+                    <Text style={{ color: '#fff', fontSize: 10 }}>×</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              {/* Upload button */}
+              <TouchableOpacity onPress={onUploadProof} style={{ backgroundColor: '#125ec9', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}>
+                <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_600SemiBold', fontSize: 12 }}>{proof ? 'Replace proof' : 'Upload proof'}</Text>
+              </TouchableOpacity>
+              {/* File name inline (optional) */}
+              {!!proof?.name && (
+                <Text numberOfLines={1} style={{ flexShrink: 1, color: '#1F2937', fontFamily: 'Inter_500Medium', fontSize: 12 }}>{proof.name}</Text>
+              )}
+            </View>
+          </View>
+
+          <TouchableOpacity onPress={onSubmit} disabled={submitting} style={{ backgroundColor: '#125ec9', paddingVertical: 14, borderRadius: 8, alignItems: 'center', opacity: submitting ? 0.7 : 1, marginTop: 16 }}>
+            {submitting ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold', fontSize: 14 }}>Submit</Text>}
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Master Products List Modal */}
       {showMasterModal ? (
@@ -663,42 +691,17 @@ export default function OrderFormScreen() {
         </Modal>
       ) : null}
 
-      {/* Date picker */}
-      {showDate && Platform.OS !== 'web' ? (
-        <DateTimePicker value={orderDate} mode="datetime" onChange={onChangeDate} />
-      ) : null}
-      {showDate && Platform.OS === 'web' ? (
-        <Modal transparent animationType="fade" visible onRequestClose={() => setShowDate(false)}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center', padding: 20 }} onPress={() => setShowDate(false)}>
-            <View style={{ width: '100%', maxWidth: 320, backgroundColor: '#fff', borderRadius: 12, padding: 16 }}>
-              <Text style={{ color: '#111827', fontFamily: 'Inter_600SemiBold', marginBottom: 12 }}>Select date & time</Text>
-              <input
-                type="datetime-local"
-                value={orderDate ? orderDate.toISOString().slice(0, 16) : ''}
-                onChange={(e) => {
-                  const date = new Date(e.target.value);
-                  if (!isNaN(date.getTime())) {
-                    setOrderDate(date);
-                    setShowDate(false);
-                  }
-                }}
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  borderWidth: 1,
-                  borderColor: '#C4C4C4',
-                  borderRadius: 8,
-                  fontSize: 14,
-                  outline: 'none'
-                }}
-              />
-              <TouchableOpacity onPress={() => setShowDate(false)} style={{ marginTop: 12, alignSelf: 'flex-end', backgroundColor: '#0F3B8C', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 16 }}>
-                <Text style={{ color: '#fff', fontFamily: 'Inter_600SemiBold' }}>Done</Text>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Modal>
-      ) : null}
+      {/* Custom Date and Time Picker */}
+      {showDate && (
+        <CustomDateTimePicker
+          visible={showDate}
+          onClose={() => setShowDate(false)}
+          onSelect={(date) => {
+            if (date) setOrderDate(date);
+          }}
+          initialDate={orderDate}
+        />
+      )}
 
       {/* Client Picker Modal */}
       {clientPickerVisible ? (

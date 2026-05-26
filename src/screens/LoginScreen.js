@@ -42,7 +42,7 @@ export default function LoginScreen({ navigation }) {
   };
 
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <View style={styles.container}>
         <View style={styles.topArea}>
           {/* https://res.cloudinary.com/dgif730br/image/upload/v1767436218/thinktech-logo-blue-300x103_1_s4uvih.png */}
@@ -83,7 +83,7 @@ export default function LoginScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#ffffff' },
-  container: { flex: 1, paddingHorizontal: 20, paddingTop: 24, paddingBottom: 120 },
+  container: { flex: 1, paddingHorizontal: 20, paddingTop: 24 },
 
   topArea: { alignItems: 'center', paddingTop: 40 },
   logo: { width: 250, height: 100, resizeMode: 'contain' },
@@ -125,7 +125,7 @@ const styles = StyleSheet.create({
     outlineWidth: 0,
   },
 
-  footerFixed: { position: 'absolute', left: 0, right: 0, bottom: 30, alignItems: 'center', paddingHorizontal: 20 },
+  footerFixed: { marginTop: 20, marginBottom: 30, alignItems: 'center', paddingHorizontal: 20 },
   primaryBtn: { width: '100%', maxWidth: 320, backgroundColor: '#0F3B8C', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
   primaryText: { color: '#FFFFFF', fontFamily: 'Inter_600SemiBold', fontSize: 14 },
 });

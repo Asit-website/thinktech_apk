@@ -14,7 +14,8 @@ import {
     RefreshControl,
     Alert,
     Platform,
-    Linking
+    Linking,
+    KeyboardAvoidingView
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
@@ -102,7 +103,7 @@ export default function TicketScreen({ navigation, route }) {
     const pickImage = async () => {
         let result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true,
+            allowsEditing: false,
             quality: 0.7,
         });
         if (!result.canceled) {
@@ -117,7 +118,7 @@ export default function TicketScreen({ navigation, route }) {
             return;
         }
         let result = await ImagePicker.launchCameraAsync({
-            allowsEditing: true,
+            allowsEditing: false,
             quality: 0.7,
         });
         if (!result.canceled) {
@@ -377,12 +378,14 @@ export default function TicketScreen({ navigation, route }) {
                 <Text style={styles.fabText}>+</Text>
             </TouchableOpacity>
 
-            {/* Create Modal */}
             <Modal visible={showCreateModal} animationType="slide" transparent>
-                <View style={styles.modalOverlay}>
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    style={styles.modalOverlay}
+                >
                     <View style={styles.modalContent}>
                         <Text style={styles.modalHeader}>{isEditMode ? 'Edit Ticket' : 'Assign New Ticket'}</Text>
-                        <ScrollView>
+                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
                             <Text style={styles.label}>Ticket ID (Mandatory & Unique)</Text>
                             <TextInput
                                 style={styles.input}
@@ -489,17 +492,19 @@ export default function TicketScreen({ navigation, route }) {
                             </TouchableOpacity>
                         </View>
                     </View>
-                </View>
+                </KeyboardAvoidingView>
             </Modal>
 
-            {/* Detail Modal */}
             <Modal visible={showDetailModal} animationType="fade" transparent>
-                <View style={styles.modalOverlay}>
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    style={styles.modalOverlay}
+                >
                     <View style={[styles.modalContent, { maxHeight: '80%' }]}>
                         {selectedTicket && (
                             <>
                                 <Text style={styles.modalHeader}>{selectedTicket.title}</Text>
-                                <ScrollView>
+                                <ScrollView showsVerticalScrollIndicator={false}>
                                     <Text style={styles.detailDesc}>{selectedTicket.description || 'No description'}</Text>
 
                                     <View style={styles.detailMeta}>
@@ -575,7 +580,7 @@ export default function TicketScreen({ navigation, route }) {
                             </>
                         )}
                     </View>
-                </View>
+                </KeyboardAvoidingView>
             </Modal>
 
         </SafeAreaView>
@@ -681,7 +686,15 @@ const styles = StyleSheet.create({
     allocationText: { fontSize: 11, color: '#9CA3AF' },
 
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-    modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 32, borderTopRightRadius: 32, padding: 24, minHeight: '60%' },
+    modalContent: { 
+        backgroundColor: '#fff', 
+        borderTopLeftRadius: 32, 
+        borderTopRightRadius: 32, 
+        padding: 24, 
+        minHeight: '60%',
+        maxHeight: '92%',
+        paddingBottom: Platform.OS === 'ios' ? 40 : 30,
+    },
     modalHeader: { fontSize: 20, fontWeight: '900', color: '#111827', marginBottom: 20 },
     label: { fontSize: 12, color: '#6B7280', fontWeight: '800', marginBottom: 8, textTransform: 'uppercase' },
     input: { backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#F3F4F6', borderRadius: 12, padding: 12, marginBottom: 16, fontSize: 14 },

@@ -20,6 +20,7 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    config.headers['X-App-Platform'] = 'mobile-apk';
 
     // Handle FormData requests - set multipart/form-data explicitly
     if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
@@ -138,24 +139,29 @@ export async function punchInWithPhoto(photoUri, coords) {
 
   const form = new FormData();
 
-  if (Platform.OS === 'web') {
-    console.log('Processing photo for web...');
-    const r = await fetch(photoUri);
-    const blob = await r.blob();
-    const file = new File([blob], 'punch-in.jpg', { type: blob.type || 'image/jpeg' });
-    form.append('photo', file);
-    console.log('Web photo processed, blob size:', blob.size);
+  if (photoUri) {
+    if (Platform.OS === 'web') {
+      console.log('Processing photo for web...');
+      const r = await fetch(photoUri);
+      const blob = await r.blob();
+      const file = new File([blob], 'punch-in.jpg', { type: blob.type || 'image/jpeg' });
+      form.append('photo', file);
+      console.log('Web photo processed, blob size:', blob.size);
+    } else {
+      console.log('Processing photo for mobile...');
+      // Fix for mobile camera picker
+      const fileName = photoUri.split('/').pop() || 'punch-in.jpg';
+      form.append('photo', {
+        uri: photoUri,
+        name: fileName,
+        type: 'image/jpeg',
+      });
+      console.log('Mobile photo processed, filename:', fileName);
+    }
   } else {
-    console.log('Processing photo for mobile...');
-    // Fix for mobile camera picker
-    const fileName = photoUri.split('/').pop() || 'punch-in.jpg';
-    form.append('photo', {
-      uri: photoUri,
-      name: fileName,
-      type: 'image/jpeg',
-    });
-    console.log('Mobile photo processed, filename:', fileName);
+    console.log('No photo URI provided, skipping photo attachment');
   }
+
 
   if (coords && typeof coords.lat === 'number' && typeof coords.lng === 'number') {
     form.append('lat', String(coords.lat));
@@ -206,24 +212,29 @@ export async function punchOutWithPhoto(photoUri, coords) {
 
   const form = new FormData();
 
-  if (Platform.OS === 'web') {
-    console.log('Processing photo for web...');
-    const r = await fetch(photoUri);
-    const blob = await r.blob();
-    const file = new File([blob], 'punch-out.jpg', { type: blob.type || 'image/jpeg' });
-    form.append('photo', file);
-    console.log('Web photo processed, blob size:', blob.size);
+  if (photoUri) {
+    if (Platform.OS === 'web') {
+      console.log('Processing photo for web...');
+      const r = await fetch(photoUri);
+      const blob = await r.blob();
+      const file = new File([blob], 'punch-out.jpg', { type: blob.type || 'image/jpeg' });
+      form.append('photo', file);
+      console.log('Web photo processed, blob size:', blob.size);
+    } else {
+      console.log('Processing photo for mobile...');
+      // Fix for mobile camera picker
+      const fileName = photoUri.split('/').pop() || 'punch-out.jpg';
+      form.append('photo', {
+        uri: photoUri,
+        name: fileName,
+        type: 'image/jpeg',
+      });
+      console.log('Mobile photo processed, filename:', fileName);
+    }
   } else {
-    console.log('Processing photo for mobile...');
-    // Fix for mobile camera picker
-    const fileName = photoUri.split('/').pop() || 'punch-out.jpg';
-    form.append('photo', {
-      uri: photoUri,
-      name: fileName,
-      type: 'image/jpeg',
-    });
-    console.log('Mobile photo processed, filename:', fileName);
+    console.log('No photo URI provided, skipping photo attachment');
   }
+
 
   if (coords && typeof coords.lat === 'number' && typeof coords.lng === 'number') {
     form.append('lat', String(coords.lat));
@@ -325,6 +336,12 @@ export async function getMyLeaveCategories(dateIso) {
 export async function getMyWeeklyOffDates(start, end) {
   const qs = `?start=${encodeURIComponent(String(start))}&end=${encodeURIComponent(String(end))}`;
   const resp = await api.get(`/leave/weekly-off/my${qs}`);
+  return resp.data;
+}
+
+export async function checkLeaveRange(start, end) {
+  const qs = `?start=${encodeURIComponent(String(start))}&end=${encodeURIComponent(String(end))}`;
+  const resp = await api.get(`/leave/check-range${qs}`);
   return resp.data;
 }
 
@@ -625,6 +642,11 @@ export async function listMyAssignedJobs() {
   return resp.data;
 }
 
+export async function listMyClients() {
+  const resp = await api.get('/sales/my-clients');
+  return resp.data;
+}
+
 export async function getAssignedJobDetail(id) {
   const resp = await api.get(`/sales/assigned-jobs/${encodeURIComponent(String(id))}`);
   return resp.data;
@@ -788,6 +810,11 @@ export async function submitExpense({ expenseType, expenseDate, amount, billNumb
   return resp.data;
 }
 
+export async function getMyExpenses() {
+  const resp = await api.get('/me/expenses');
+  return resp.data;
+}
+
 // Activities
 export async function listMyActivities() {
   const resp = await api.get('/activities/me');
@@ -875,5 +902,15 @@ export async function listAllStaff() {
 
 export async function askAI(messages) {
   const resp = await api.post('/ai/ask', { messages });
+  return resp.data;
+}
+
+export async function listMyVisits() {
+  const resp = await api.get('/sales/my-visits');
+  return resp.data;
+}
+
+export async function listMyOrders() {
+  const resp = await api.get('/sales/my-orders');
   return resp.data;
 }

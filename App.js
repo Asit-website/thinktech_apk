@@ -25,11 +25,13 @@ import SalaryScreen from './src/screens/SalaryScreen';
 import SalaryReportScreen from './src/screens/SalaryReportScreen';
 import ReportsScreen from './src/screens/ReportsScreen';
 import OrderFormScreen from './src/screens/OrderFormScreen';
+import OrderHistoryScreen from './src/screens/OrderHistoryScreen';
 import ExpenseScreen from './src/screens/ExpenseScreen';
 import AssignedJobsScreen from './src/screens/AssignedJobsScreen';
 import AssignedJobDetailScreen from './src/screens/AssignedJobDetailScreen';
 import TargetsScreen from './src/screens/TargetsScreen';
 import VisitFormScreen from './src/screens/VisitFormScreen';
+import VisitHistoryScreen from './src/screens/VisitHistoryScreen';
 import MyDocumentsScreen from './src/screens/MyDocumentsScreen';
 import BankDetailsScreen from './src/screens/BankDetailsScreen';
 import AccountSettingsScreen from './src/screens/AccountSettingsScreen';
@@ -40,6 +42,7 @@ import ActivityScreen from './src/screens/ActivityScreen';
 import MeetingScreen from './src/screens/MeetingScreen';
 import TicketScreen from './src/screens/TicketScreen';
 import AIChatScreen from './src/screens/AIChatScreen';
+import QRScannerScreen from './src/screens/QRScannerScreen';
 import ToastHost from './src/components/ToastHost';
 import AndroidNotification from './src/components/AndroidNotification';
 import { setNotificationRef } from './src/utils/notify';
@@ -68,7 +71,7 @@ export default function App() {
     (async () => {
       try {
         const token = await AsyncStorage.getItem('auth_token');
-        if (mounted) setInitialRoute(token ? 'Home' : 'Login');
+        if (mounted) setInitialRoute(token ? 'Attendance' : 'Login');
       } catch (e) {
         if (mounted) setInitialRoute('Login');
       }
@@ -175,6 +178,7 @@ export default function App() {
               <Stack.Screen name="Sales" component={SalesScreen} options={{ headerShown: false }} />
               <Stack.Screen name="SalesReport" component={SalesReportScreen} options={{ headerShown: false }} />
               <Stack.Screen name="VisitForm" component={VisitFormScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="VisitHistory" component={VisitHistoryScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Salary" component={SalaryScreen} options={{ headerShown: false }} />
               <Stack.Screen name="SalaryReport" component={SalaryReportScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Reports" component={ReportsScreen} options={{ headerShown: false }} />
@@ -182,12 +186,14 @@ export default function App() {
               <Stack.Screen name="AssignedJobDetail" component={AssignedJobDetailScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Targets" component={TargetsScreen} options={{ headerShown: false }} />
               <Stack.Screen name="OrderForm" component={OrderFormScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="OrderHistory" component={OrderHistoryScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Expense" component={ExpenseScreen} options={{ headerShown: false }} />
               <Stack.Screen name="TodoList" component={TodoListScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Activity" component={ActivityScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Meeting" component={MeetingScreen} options={{ headerShown: false }} />
               <Stack.Screen name="Ticket" component={TicketScreen} options={{ headerShown: false }} />
               <Stack.Screen name="AIChat" component={AIChatScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="QRScanner" component={QRScannerScreen} options={{ headerShown: false }} />
             </Stack.Navigator>
           </NavigationContainer>
         </PermissionsProvider>

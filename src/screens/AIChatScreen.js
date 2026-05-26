@@ -11,8 +11,10 @@ import {
   ActivityIndicator,
   Image,
   Dimensions,
+  Keyboard,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import BottomNav from '../components/BottomNav';
 import { askAI } from '../config/api';
 import { notifyError } from '../utils/notify';
 import dayjs from 'dayjs';
@@ -30,6 +32,7 @@ export default function AIChatScreen() {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const scrollViewRef = useRef();
 
   const handleSend = async () => {
@@ -57,8 +60,28 @@ export default function AIChatScreen() {
   };
 
   useEffect(() => {
+    const showSubscription = Keyboard.addListener(
+      Platform.OS === 'android' ? 'keyboardDidShow' : 'keyboardWillShow',
+      () => setKeyboardVisible(true)
+    );
+    const hideSubscription = Keyboard.addListener(
+      Platform.OS === 'android' ? 'keyboardDidHide' : 'keyboardWillHide',
+      () => setKeyboardVisible(false)
+    );
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
     scrollViewRef.current?.scrollToEnd({ animated: true });
   }, [messages, loading]);
+
+  const inputBottomPadding = keyboardVisible
+    ? 12
+    : (Platform.OS === 'ios' ? 88 : 80);
 
   return (
     <View style={styles.container}>
@@ -79,61 +102,62 @@ export default function AIChatScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView
-        ref={scrollViewRef}
-        style={styles.chatContainer}
-        contentContainerStyle={styles.chatContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {messages.map((msg, index) => (
-          <View
-            key={index}
-            style={[
-              styles.messageWrapper,
-              msg.role === 'user' ? styles.userWrapper : styles.assistantWrapper
-            ]}
-          >
-            {msg.role === 'assistant' && (
-              <View style={styles.aiAvatar}>
-                 <Text style={styles.aiAvatarText}>AI</Text>
-              </View>
-            )}
-            <View style={[
-              styles.messageBubble,
-              msg.role === 'user' ? styles.userBubble : styles.assistantBubble
-            ]}>
-              <Text style={[
-                styles.messageText,
-                msg.role === 'user' ? styles.userText : styles.assistantText
-              ]}>
-                {msg.content}
-              </Text>
-              <Text style={[
-                styles.timestamp,
-                msg.role === 'user' ? styles.userTimestamp : styles.assistantTimestamp
-              ]}>
-                {dayjs(msg.timestamp).format('hh:mm A')}
-              </Text>
-            </View>
-          </View>
-        ))}
-        {loading && (
-          <View style={styles.assistantWrapper}>
-             <View style={styles.aiAvatar}>
-                 <Text style={styles.aiAvatarText}>AI</Text>
-              </View>
-            <View style={[styles.messageBubble, styles.assistantBubble, { paddingVertical: 15 }]}>
-              <ActivityIndicator size="small" color="#125EC9" />
-            </View>
-          </View>
-        )}
-      </ScrollView>
-
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-        <View style={styles.inputArea}>
+        <ScrollView
+          ref={scrollViewRef}
+          style={styles.chatContainer}
+          contentContainerStyle={styles.chatContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {messages.map((msg, index) => (
+            <View
+              key={index}
+              style={[
+                styles.messageWrapper,
+                msg.role === 'user' ? styles.userWrapper : styles.assistantWrapper
+              ]}
+            >
+              {msg.role === 'assistant' && (
+                <View style={styles.aiAvatar}>
+                   <Text style={styles.aiAvatarText}>AI</Text>
+                </View>
+              )}
+              <View style={[
+                styles.messageBubble,
+                msg.role === 'user' ? styles.userBubble : styles.assistantBubble
+              ]}>
+                <Text style={[
+                  styles.messageText,
+                  msg.role === 'user' ? styles.userText : styles.assistantText
+                ]}>
+                  {msg.content}
+                </Text>
+                <Text style={[
+                  styles.timestamp,
+                  msg.role === 'user' ? styles.userTimestamp : styles.assistantTimestamp
+                ]}>
+                  {dayjs(msg.timestamp).format('hh:mm A')}
+                </Text>
+              </View>
+            </View>
+          ))}
+          {loading && (
+            <View style={styles.assistantWrapper}>
+               <View style={styles.aiAvatar}>
+                   <Text style={styles.aiAvatarText}>AI</Text>
+                </View>
+              <View style={[styles.messageBubble, styles.assistantBubble, { paddingVertical: 15 }]}>
+                <ActivityIndicator size="small" color="#125EC9" />
+              </View>
+            </View>
+          )}
+        </ScrollView>
+
+        <View style={[styles.inputArea, { paddingBottom: inputBottomPadding }]}>
           <View style={styles.inputContainer}>
             <TextInput
               style={[styles.input, Platform.OS === 'web' && { outlineStyle: 'none' }]}
@@ -156,6 +180,7 @@ export default function AIChatScreen() {
           </View>
         </View>
       </KeyboardAvoidingView>
+      {!keyboardVisible && <BottomNav navigation={navigation} activeKey="ai" />}
     </View>
   );
 }
@@ -293,6 +318,7 @@ const styles = StyleSheet.create({
   },
   inputArea: {
     padding: 12,
+    paddingBottom: 12,
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#F3F4F6',

@@ -1,10 +1,10 @@
 import React from 'react';
 
-import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, TextInput, Platform, Modal, Pressable, ActivityIndicator } from 'react-native';
+import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, TextInput, Platform, Modal, Pressable, ActivityIndicator, KeyboardAvoidingView } from 'react-native';
 
 import * as ImagePicker from 'expo-image-picker';
 
-import { sendClientOtp, submitVisitForm, getMyProfile, getAssignedJobDetail, listMyAssignedJobs } from '../config/api';
+import { sendClientOtp, submitVisitForm, getMyProfile, getAssignedJobDetail, listMyAssignedJobs, listMyClients } from '../config/api';
 
 import { useRoute } from '@react-navigation/native';
 
@@ -12,7 +12,7 @@ import { notifySuccess, notifyError, notifyInfo } from '../utils/notify';
 import { formatAddress } from '../services/locationService';
 
 
-import DateTimePicker from '@react-native-community/datetimepicker';
+import CustomDateTimePicker from '../components/CustomDateTimePicker';
 
 
 
@@ -45,6 +45,7 @@ export default function VisitFormScreen({ navigation }) {
   const [submitting, setSubmitting] = React.useState(false);
   const [sendingOtp, setSendingOtp] = React.useState(false);
   const [otpSent, setOtpSent] = React.useState(false);
+  const [showPhoneError, setShowPhoneError] = React.useState(false);
 
 
 
@@ -247,24 +248,15 @@ export default function VisitFormScreen({ navigation }) {
 
       setClientPickerVisible(true);
 
-      const res = await listMyAssignedJobs();
-
-      const rows = Array.isArray(res?.jobs) ? res.jobs : [];
-
-      const opts = rows.map((r) => ({
-
-        id: r.client?.id || null,
-
-        name: r.client?.name || 'Client',
-
-        phone: r.client?.phone || '',
-
-        clientType: r.client?.clientType || '',
-
-        location: r.client?.location || '',
-
+      const res = await listMyClients();
+      const rows = Array.isArray(res?.clients) ? res.clients : [];
+      const opts = rows.map((c) => ({
+        id: c.id || null,
+        name: c.name || 'Client',
+        phone: c.phone || '',
+        clientType: c.clientType || '',
+        location: c.location || '',
       })).filter((c) => c.id);
-
       setClientOptions(opts);
 
     } catch (_) { }
@@ -438,15 +430,15 @@ export default function VisitFormScreen({ navigation }) {
         return;
       }
 
-      // Require OTP verification if phone number is provided (not for assigned jobs)
-      if (!assignedJobId && phone && phone.trim().length >= 10) {
+      // If OTP is entered, validate it (must have been sent and have valid format)
+      if (clientOtp && clientOtp.trim().length > 0) {
         if (!otpSent) {
-          notifyError('Please send OTP to the client first');
+          notifyError('Please send OTP to the client first before entering it');
           setSubmitting(false);
           return;
         }
-        if (!clientOtp || clientOtp.trim().length < 4) {
-          notifyError('Please enter the OTP sent to client');
+        if (clientOtp.trim().length < 4) {
+          notifyError('Please enter a valid OTP');
           setSubmitting(false);
           return;
         }
@@ -556,176 +548,191 @@ export default function VisitFormScreen({ navigation }) {
 
 
 
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
 
-        {/* Visit Details */}
+          {/* Visit Details */}
 
-        <Text style={styles.sectionTitle}>Visit Details</Text>
+          <Text style={styles.sectionTitle}>Visit Details</Text>
 
-        <View style={styles.card}>
+          <View style={styles.card}>
 
-          <FormRow label="Visit Date and Time">
+            <FormRow label="Visit Date and Time">
 
-            {Platform.OS === 'web' ? (
+              {Platform.OS === 'web' ? (
 
-              <TouchableOpacity onPress={() => setShowDate(true)} style={[styles.inputBoxRow, { justifyContent: 'space-between' }]}>
+                <TouchableOpacity onPress={() => setShowDate(true)} style={[styles.inputBoxRow, { justifyContent: 'space-between' }]}>
 
-                <Text style={styles.inputText}>{fmt(visitDate)}</Text>
+                  <Text style={styles.inputText}>{fmt(visitDate)}</Text>
 
-                <Image source={require('../assets/calendar2-range.png')} style={{ width: 16, height: 16 }} />
-
-              </TouchableOpacity>
-
-            ) : (
-
-              <TouchableOpacity onPress={() => setShowDate(true)} style={[styles.inputBoxRow, { justifyContent: 'space-between' }]}>
-
-                <Text style={styles.inputText}>{fmt(visitDate)}</Text>
-
-                <Image source={require('../assets/calendar2-range.png')} style={{ width: 16, height: 16 }} />
-
-              </TouchableOpacity>
-
-            )}
-
-          </FormRow>
-
-          {showDate && Platform.OS !== 'web' && (
-
-            <DateTimePicker value={visitDate || new Date()} mode="datetime" display="default" onChange={onChangeDate} />
-
-          )}
-
-          <FormRow label="Sales Person">
-
-            <TextInput value={salesPerson} onChangeText={setSalesPerson} style={styles.textInput} placeholder="Enter name" placeholderTextColor="#9CA3AF" />
-
-          </FormRow>
-
-          <FormRow label="Visit Type">
-
-            <TouchableOpacity style={styles.inputBoxRow} onPress={() => setSelectKey('visitType')}>
-
-              <Text style={styles.inputText}>{visitType}</Text>
-
-              <Image source={require('../assets/down.png')} style={{ width: 10, height: 10 }} />
-
-            </TouchableOpacity>
-
-          </FormRow>
-
-        </View>
-
-
-
-        {/* Divider between sections */}
-
-        <View style={styles.sectionDivider} />
-
-        {/* Client Information */}
-
-        <Text style={[styles.sectionTitle, { marginTop: 0 }]}>Client Information</Text>
-
-        <View style={styles.card}>
-
-          <FormRow label="Client Name">
-
-            <View style={styles.inputBoxRow}>
-
-              <TextInput
-
-                value={clientName}
-
-                onChangeText={setClientName}
-
-                style={[styles.textInput, { flex: 1 }]}
-
-                placeholder="Enter client name"
-
-                placeholderTextColor="#9CA3AF"
-
-                editable={!assignedJobId}
-
-              />
-
-              {!assignedJobId ? (
-
-                <TouchableOpacity onPress={openClientPicker} style={styles.pickButton}>
-
-                  <Text style={styles.pickButtonText}>Pick</Text>
+                  <Image source={require('../assets/calendar2-range.png')} style={{ width: 16, height: 16 }} />
 
                 </TouchableOpacity>
 
-              ) : null}
+              ) : (
 
-            </View>
+                <TouchableOpacity onPress={() => setShowDate(true)} style={[styles.inputBoxRow, { justifyContent: 'space-between' }]}>
 
-          </FormRow>
+                  <Text style={styles.inputText}>{fmt(visitDate)}</Text>
 
-          <FormRow label="Phone Number">
+                  <Image source={require('../assets/calendar2-range.png')} style={{ width: 16, height: 16 }} />
 
-            <View style={styles.phoneInputRow}>
+                </TouchableOpacity>
 
-              <TextInput
+              )}
 
-                value={phone}
+            </FormRow>
 
-                onChangeText={setPhone}
-
-                keyboardType="phone-pad"
-
-                style={[styles.textInput, styles.phoneInput]}
-
-                placeholder="Enter phone"
-
-                placeholderTextColor="#9CA3AF"
-
-                editable={!assignedJobId}
-
+            {showDate && (
+              <CustomDateTimePicker
+                visible={showDate}
+                onClose={() => setShowDate(false)}
+                onSelect={(d) => {
+                  if (d) setVisitDate(d);
+                }}
+                initialDate={visitDate || new Date()}
               />
+            )}
 
-              <TouchableOpacity
-                style={[styles.sendOtpButton, sendingOtp && styles.sendOtpButtonDisabled]}
-                onPress={handleSendOtp}
-                disabled={sendingOtp || !phone || phone.trim().length < 10}
-              >
-                {sendingOtp ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={styles.sendOtpButtonText}>
-                    {otpSent ? 'Resend OTP' : 'Send OTP'}
-                  </Text>
-                )}
+            <FormRow label="Sales Person">
+
+              <TextInput value={salesPerson} onChangeText={setSalesPerson} style={styles.textInput} placeholder="Enter name" placeholderTextColor="#9CA3AF" />
+
+            </FormRow>
+
+            <FormRow label="Visit Type">
+
+              <TouchableOpacity style={styles.inputBoxRow} onPress={() => setSelectKey('visitType')}>
+
+                <Text style={styles.inputText}>{visitType}</Text>
+
+                <Image source={require('../assets/down.png')} style={{ width: 10, height: 10 }} />
+
               </TouchableOpacity>
 
-            </View>
+            </FormRow>
 
-          </FormRow>
-
-          <FormRow label="Client Type">
-
-            <TouchableOpacity style={styles.inputBoxRow} onPress={() => setSelectKey('clientType')}>
-
-              <Text style={styles.inputText}>{clientType}</Text>
-
-              <Image source={require('../assets/down.png')} style={{ width: 10, height: 10 }} />
-
-            </TouchableOpacity>
-
-          </FormRow>
-
-          <FormRow label="Location">
-
-            <TextInput value={location} onChangeText={setLocation} style={styles.textInput} placeholder="Enter location" placeholderTextColor="#9CA3AF" />
-
-          </FormRow>
-
-        </View>
+          </View>
 
 
 
-        {/* Attachments - Commented out */}
-        {/*
+          {/* Divider between sections */}
+
+          <View style={styles.sectionDivider} />
+
+          {/* Client Information */}
+
+          <Text style={[styles.sectionTitle, { marginTop: 0 }]}>Client Information</Text>
+
+          <View style={styles.card}>
+
+            <FormRow label="Client Name">
+
+              <View style={styles.inputBoxRow}>
+
+                <TextInput
+
+                  value={clientName}
+
+                  onChangeText={setClientName}
+
+                  style={[styles.textInput, { flex: 1 }]}
+
+                  placeholder="Enter client name"
+
+                  placeholderTextColor="#9CA3AF"
+
+                  editable={!assignedJobId}
+
+                />
+
+                {!assignedJobId ? (
+
+                  <TouchableOpacity onPress={openClientPicker} style={styles.pickButton}>
+
+                    <Text style={styles.pickButtonText}>Pick</Text>
+
+                  </TouchableOpacity>
+
+                ) : null}
+
+              </View>
+
+            </FormRow>
+
+            <FormRow label="Phone Number">
+
+              <View style={styles.phoneInputRow}>
+
+                <TextInput
+                  value={phone}
+                  onChangeText={(val) => {
+                    const cleaned = val.replace(/[^0-9]/g, '');
+                    if (cleaned.length > 10) {
+                      setShowPhoneError(true);
+                    } else {
+                      setShowPhoneError(false);
+                      setPhone(cleaned);
+                    }
+                  }}
+                  keyboardType="phone-pad"
+                  maxLength={11}
+                  style={[styles.textInput, styles.phoneInput]}
+                  placeholder="Enter phone"
+                  placeholderTextColor="#9CA3AF"
+                  editable={!assignedJobId}
+                />
+
+                <TouchableOpacity
+                  style={[styles.sendOtpButton, (sendingOtp || phone.length !== 10) && styles.sendOtpButtonDisabled]}
+                  onPress={handleSendOtp}
+                  disabled={sendingOtp || phone.length !== 10}
+                >
+                  {sendingOtp ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.sendOtpButtonText}>
+                      {otpSent ? 'Resend OTP' : 'Send OTP'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+
+              </View>
+              {showPhoneError && (
+                <Text style={{ color: '#F24E43', fontSize: 10, marginTop: 4, fontFamily: 'Inter_500Medium' }}>
+                  cant be more than 10 digit
+                </Text>
+              )}
+
+            </FormRow>
+
+            <FormRow label="Client Type">
+
+              <TouchableOpacity style={styles.inputBoxRow} onPress={() => setSelectKey('clientType')}>
+
+                <Text style={styles.inputText}>{clientType}</Text>
+
+                <Image source={require('../assets/down.png')} style={{ width: 10, height: 10 }} />
+
+              </TouchableOpacity>
+
+            </FormRow>
+
+            <FormRow label="Location">
+
+              <TextInput value={location} onChangeText={setLocation} style={styles.textInput} placeholder="Enter location" placeholderTextColor="#9CA3AF" />
+
+            </FormRow>
+
+          </View>
+
+
+
+          {/* Attachments - Commented out */}
+          {/*
         <View style={styles.sectionDivider} />
 
         <Text style={[styles.sectionTitle, { marginTop: 0 }]}>Attachments</Text>
@@ -781,119 +788,96 @@ export default function VisitFormScreen({ navigation }) {
 
 
 
-        {/* Client Verification */}
+          {/* Client Verification */}
 
-        <View style={styles.sectionDivider} />
+          <View style={styles.sectionDivider} />
 
-        <Text style={[styles.sectionTitle, { marginTop: 0 }]}>Client Verification</Text>
+          <Text style={[styles.sectionTitle, { marginTop: 0 }]}>Client Verification</Text>
 
-        <View style={styles.card}>
+          <View style={styles.card}>
 
-          <FormRow label="Client OTP (Optional)">
+            <FormRow label="Client OTP (Optional)">
 
-            <TextInput value={clientOtp} onChangeText={setClientOtp} keyboardType="number-pad" style={styles.textInput} placeholder="Enter OTP" placeholderTextColor="#9CA3AF" />
+              <TextInput value={clientOtp} onChangeText={setClientOtp} keyboardType="number-pad" style={styles.textInput} placeholder="Enter OTP" placeholderTextColor="#9CA3AF" />
 
-          </FormRow>
+            </FormRow>
 
-          <FormRow label="Client Signature (Photo)">
+            <FormRow label="Client Signature (Photo)">
 
-            {clientSignature ? (
+              {clientSignature ? (
 
-              <View style={{ gap: 8 }}>
+                <View style={{ gap: 8 }}>
 
-                <Image source={{ uri: clientSignature.uri }} style={{ width: 160, height: 80, borderRadius: 8, backgroundColor: '#E5E7EB' }} />
+                  <Image source={{ uri: clientSignature.uri }} style={{ width: 160, height: 80, borderRadius: 8, backgroundColor: '#E5E7EB' }} />
+
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+
+                    <TouchableOpacity onPress={() => setClientSignature(null)} style={[styles.inputBox, { alignItems: 'center' }]}>
+
+                      <Text style={styles.inputText}>Remove</Text>
+
+                    </TouchableOpacity>
+
+                    <TouchableOpacity onPress={pickSignatureFromLibrary} style={[styles.inputBox, { alignItems: 'center' }]}>
+
+                      <Text style={styles.inputText}>Replace</Text>
+
+                    </TouchableOpacity>
+
+                  </View>
+
+                </View>
+
+              ) : (
 
                 <View style={{ flexDirection: 'row', gap: 10 }}>
 
-                  <TouchableOpacity onPress={() => setClientSignature(null)} style={[styles.inputBox, { alignItems: 'center' }]}>
+                  <TouchableOpacity onPress={captureSignatureFromCamera} style={[styles.inputBox, { alignItems: 'center', justifyContent: 'center' }]}>
 
-                    <Text style={styles.inputText}>Remove</Text>
+                    <Text style={styles.inputText}>Capture Signature</Text>
 
                   </TouchableOpacity>
 
-                  <TouchableOpacity onPress={pickSignatureFromLibrary} style={[styles.inputBox, { alignItems: 'center' }]}>
+                  <TouchableOpacity onPress={pickSignatureFromLibrary} style={[styles.inputBox, { alignItems: 'center', justifyContent: 'center' }]}>
 
-                    <Text style={styles.inputText}>Replace</Text>
+                    <Text style={styles.inputText}>Upload File</Text>
 
                   </TouchableOpacity>
 
                 </View>
 
-              </View>
+              )}
 
-            ) : (
+            </FormRow>
 
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-
-                <TouchableOpacity onPress={captureSignatureFromCamera} style={[styles.inputBox, { alignItems: 'center', justifyContent: 'center' }]}>
-
-                  <Text style={styles.inputText}>Capture Signature</Text>
-
-                </TouchableOpacity>
-
-                <TouchableOpacity onPress={pickSignatureFromLibrary} style={[styles.inputBox, { alignItems: 'center', justifyContent: 'center' }]}>
-
-                  <Text style={styles.inputText}>Upload File</Text>
-
-                </TouchableOpacity>
-
-              </View>
-
-            )}
-
-          </FormRow>
-
-        </View>
+          </View>
 
 
 
-        <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
 
-          <TouchableOpacity onPress={() => !submitting && navigation.goBack()} disabled={submitting} style={{ flex: 1, backgroundColor: '#fff', borderRadius: 8, paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: "#125EC9" }}>
+            <TouchableOpacity onPress={() => !submitting && navigation.goBack()} disabled={submitting} style={{ flex: 1, backgroundColor: '#fff', borderRadius: 8, paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: "#125EC9" }}>
 
-            <Text style={{ color: '#125EC9', fontFamily: 'Inter_600SemiBold' }}>Cancel</Text>
+              <Text style={{ color: '#125EC9', fontFamily: 'Inter_600SemiBold' }}>Cancel</Text>
 
-          </TouchableOpacity>
+            </TouchableOpacity>
 
-          <TouchableOpacity onPress={onSubmit} disabled={submitting} style={{ flex: 1, backgroundColor: '#0059D7', borderRadius: 8, paddingVertical: 10, alignItems: 'center', opacity: submitting ? 0.8 : 1 }}>
+            <TouchableOpacity onPress={onSubmit} disabled={submitting} style={{ flex: 1, backgroundColor: '#0059D7', borderRadius: 8, paddingVertical: 10, alignItems: 'center', opacity: submitting ? 0.8 : 1 }}>
 
-            {submitting ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontFamily: 'Inter_600SemiBold' }}>Save Visit</Text>}
+              {submitting ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontFamily: 'Inter_600SemiBold' }}>Save Visit</Text>}
 
-          </TouchableOpacity>
+            </TouchableOpacity>
 
-        </View>
+          </View>
 
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
 
 
       {/* Web fallback date modal */}
 
-      {showDate && Platform.OS === 'web' && (
 
-        <Modal transparent animationType="fade" visible={showDate} onRequestClose={() => setShowDate(false)}>
-
-          <Pressable style={styles.modalBackdrop} onPress={() => setShowDate(false)}>
-
-            <View style={styles.modalCard}>
-
-              <Text style={styles.modalTitle}>Select date & time</Text>
-
-              <DateTimePicker value={visitDate || new Date()} mode="datetime" display="default" onChange={onChangeDate} />
-
-              <TouchableOpacity onPress={() => setShowDate(false)} style={styles.modalBtn}>
-
-                <Text style={styles.modalBtnText}>Done</Text>
-
-              </TouchableOpacity>
-
-            </View>
-
-          </Pressable>
-
-        </Modal>
-
-      )}
 
 
 

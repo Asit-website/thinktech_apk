@@ -217,7 +217,7 @@ export default function SalaryScreen({ navigation }) {
       style: 'currency',
       currency: 'INR',
       minimumFractionDigits: 2,
-      maximumFractionDigits: 5,
+      maximumFractionDigits: 2,
     }).format(Number(amount || 0));
   };
 
