@@ -23,6 +23,7 @@ export default function AttendanceScreen({ navigation }) {
   const [user, setUser] = useState(null);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [showLocationDisclosure, setShowLocationDisclosure] = useState(false);
+  const pendingPunchInRef = React.useRef(false);
 
   const loadStatus = async () => {
     try {
@@ -231,45 +232,55 @@ export default function AttendanceScreen({ navigation }) {
 
   const handleLocationDisclosureAgree = async () => {
     setShowLocationDisclosure(false);
+    
     try {
-      console.log('Starting location tracking after user disclosure agreement...');
-      const trackingStarted = await locationTrackingService.startTracking();
-      if (trackingStarted) {
-        notifyInfo('Location tracking started for your shift (pings every 100m).');
+      console.log('[Location] Disclosure agreed. Requesting foreground permission immediately...');
+      const Location = await import('expo-location');
+      const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
+      
+      if (fgStatus === 'granted') {
+        console.log('[Location] Foreground permission granted. Requesting background permission immediately...');
+        const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
+        
+        if (bgStatus === 'granted') {
+          console.log('[Location] Background permission granted. Starting background tracking...');
+          await locationTrackingService.startTracking();
+          notifyInfo('Location tracking started for your shift.');
+        } else {
+          console.warn('[Location] Background permission denied');
+          notifyInfo('Background tracking disabled. Foreground check-ins will still work.');
+        }
       } else {
-        notifyInfo('Location permission denied. Enable location access to sync movement data.');
+        console.warn('[Location] Foreground permission denied');
+        notifyInfo('Location permission denied.');
       }
     } catch (e) {
-      console.error('Failed to start tracking after disclosure:', e);
+      console.error('[Location] Failed to request location permissions:', e);
+    }
+    
+    // Proceed with punch-in if user initiated it
+    if (pendingPunchInRef.current) {
+      pendingPunchInRef.current = false;
+      await performPunchInActual();
     }
   };
 
   const handleLocationDisclosureDeny = () => {
     setShowLocationDisclosure(false);
+    pendingPunchInRef.current = false;
     notifyInfo('Background tracking disabled. Foreground check-ins will still work.');
   };
 
-  const onPunchIn = async () => {
-    console.log('Starting punch-in process...');
+  const performPunchInActual = async () => {
+    console.log('[PunchIn] Starting punch-in sequence...');
     const uri = null;
-    // const uri = await pickPhoto();
-    // if (!uri) {
-    //   console.log('No photo URI returned, cancelling punch-in');
-    //   return;
-    // }
-
-
-    console.log('Photo URI obtained, starting punch-in API call...');
     setLoading(true);
     try {
-      // Request location permission and capture coordinates
+      // Capture coordinates (foreground permission is guaranteed to be granted here)
       let coords = null;
       try {
-        console.log('Getting location...');
+        console.log('[PunchIn] Getting active position coordinates...');
         const Location = await import('expo-location');
-        const { status: perm } = await Location.requestForegroundPermissionsAsync();
-
-        if (perm !== 'granted') throw new Error('Location permission denied');
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
         let addr = null;
         try {
@@ -283,36 +294,23 @@ export default function AttendanceScreen({ navigation }) {
           accuracy: loc.coords.accuracy,
           address: addr
         };
-
-      } catch (e) {
-        // If no geofence is assigned, backend will still allow. We'll pass no coords in that case.
+      } catch (err) {
+        console.warn('[PunchIn] Failed to fetch coordinates, continuing punch-in:', err);
       }
 
-      console.log('Making punch-in API call...');
+      console.log('[PunchIn] Dispatching punch-in request to backend...');
       const res = await punchInWithPhoto(uri, coords);
 
       if (res?.success) {
-        console.log('Punch-in successful, refreshing status...');
+        console.log('[PunchIn] Punch-in successful, reloading status...');
         await loadStatus();
         notifySuccess('Punch-in recorded successfully.');
 
-        // Start location tracking after successful punch-in
+        // Start location tracking after successful punch-in (permissions are already verified)
         try {
-          console.log('Checking location tracking permissions...');
-          const Location = await import('expo-location');
-          const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
-          const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
-
-          if (fgStatus === 'granted' && bgStatus === 'granted') {
-            console.log('Permissions already granted, starting tracking...');
-            await locationTrackingService.startTracking();
-            notifyInfo('Location tracking started for your shift (pings every 100m).');
-          } else {
-            console.log('Permissions missing, showing prominent disclosure modal...');
-            setShowLocationDisclosure(true);
-          }
+          await locationTrackingService.startTracking();
         } catch (e) {
-          console.error('Failed to handle location tracking permission flow:', e);
+          console.error('[PunchIn] Failed to start background tracking:', e);
         }
 
         // Show photo preview
@@ -334,7 +332,7 @@ export default function AttendanceScreen({ navigation }) {
         if (queued) {
           notifySuccess('Punch-in recorded successfully.');
           setPendingSyncCount(prev => prev + 1);
-          await loadStatus(); // Refresh from local cache
+          await loadStatus();
         } else {
           notifyError('Failed to save offline punch-in.');
         }
@@ -343,6 +341,28 @@ export default function AttendanceScreen({ navigation }) {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onPunchIn = async () => {
+    console.log('[PunchIn] User clicked Punch In. Verifying location permission status...');
+    try {
+      const Location = await import('expo-location');
+      const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
+      const { status: bgStatus } = await Location.getBackgroundPermissionsAsync();
+
+      if (fgStatus === 'granted' && bgStatus === 'granted') {
+        console.log('[PunchIn] Permissions already granted. Triggering check-in...');
+        await performPunchInActual();
+      } else {
+        console.log('[PunchIn] Location permissions missing. Showing prominent disclosure modal first...');
+        pendingPunchInRef.current = true;
+        setShowLocationDisclosure(true);
+      }
+    } catch (e) {
+      console.error('[PunchIn] Permission verification failed, showing disclosure fallback:', e);
+      pendingPunchInRef.current = true;
+      setShowLocationDisclosure(true);
     }
   };
 
@@ -769,7 +789,7 @@ export default function AttendanceScreen({ navigation }) {
             
             <ScrollView style={styles.disclosureScroll} showsVerticalScrollIndicator={false}>
               <Text style={styles.disclosureText}>
-                <Text style={{ fontWeight: 'bold', color: '#1E293B' }}>Vetansutra</Text> collects location data to enable:
+                Vetansutra collects location data to enable employee attendance tracking, check-in/check-out verification, and field activity tracking even when the app is closed or not in use.
               </Text>
               
               <View style={styles.disclosureBullet}>

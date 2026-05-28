@@ -63,10 +63,23 @@ export default function MyDocumentsScreen({ navigation }) {
       const asset = res.assets?.[0];
       if (!asset?.uri) return null;
 
+      const type = asset.mimeType || 'application/octet-stream';
+      const isAllowedType = type === 'application/pdf' || type.startsWith('image/');
+      if (!isAllowedType) {
+        notifyError('Only Images (JPG, PNG) or PDFs are allowed!');
+        return null;
+      }
+
+      const size = asset.size || 0;
+      if (size > 10 * 1024 * 1024) {
+        notifyError('File size exceeds the limit of 10MB!');
+        return null;
+      }
+
       return {
         uri: asset.uri,
         name: asset.name || 'document',
-        type: asset.mimeType || 'application/octet-stream',
+        type: type,
       };
     } catch (e) {
       notifyError('Unable to pick file.');
@@ -90,6 +103,12 @@ export default function MyDocumentsScreen({ navigation }) {
       if (result.canceled) return null;
       const asset = result.assets?.[0];
       if (!asset?.uri) return null;
+
+      const size = asset.size || 0;
+      if (size > 10 * 1024 * 1024) {
+        notifyError('Captured image size exceeds 10MB!');
+        return null;
+      }
 
       return {
         uri: asset.uri,
@@ -165,6 +184,11 @@ export default function MyDocumentsScreen({ navigation }) {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.infoBox}>
+          <Text style={styles.infoText}>📌 Allowed format: Images (JPG, PNG) or PDFs</Text>
+          <Text style={styles.infoText}>📌 Max file size: 10 MB per file</Text>
+        </View>
+
         {loading ? (
           <View style={{ paddingVertical: 24 }}><ActivityIndicator /></View>
         ) : null}
@@ -270,4 +294,18 @@ const styles = StyleSheet.create({
   previewText: { color: '#111827', fontFamily: 'Inter_500Medium', fontSize: 12 },
   viewBtn: { marginTop: 6, alignSelf: 'flex-start', backgroundColor: '#0F3B8C', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10 },
   viewBtnText: { color: '#fff', fontFamily: 'Inter_600SemiBold', fontSize: 12 },
+  infoBox: {
+    backgroundColor: '#EFF6FF',
+    borderColor: '#BFDBFE',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  infoText: {
+    color: '#1E40AF',
+    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
+    lineHeight: 18,
+  },
 });

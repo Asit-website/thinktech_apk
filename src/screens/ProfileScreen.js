@@ -151,7 +151,22 @@ export default function ProfileScreen({ navigation }) {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
       if (result.canceled) return null;
-      return result.assets?.[0]?.uri || null;
+      const asset = result.assets?.[0];
+      if (!asset?.uri) return null;
+
+      const size = asset.fileSize || 0;
+      if (size > 2 * 1024 * 1024) {
+        notifyError('Image size exceeds the limit of 2MB!');
+        return null;
+      }
+
+      const type = asset.mimeType || '';
+      if (type && !type.startsWith('image/')) {
+        notifyError('Only Images (JPG, PNG) are allowed!');
+        return null;
+      }
+
+      return asset.uri;
     } catch (e) {
       notifyError('Unable to pick image. Please try again.');
       return null;
@@ -228,6 +243,9 @@ export default function ProfileScreen({ navigation }) {
               <Image source={require('../assets/tab5.png')} style={{ width: 72, height: 72, borderRadius: 36, marginBottom: 12 }} />
             )}
           </TouchableOpacity>
+          <Text style={{ fontSize: 10, color: '#6B7280', marginTop: -4, marginBottom: 12, fontFamily: 'Inter_400Regular' }}>
+            Max 2 MB, JPG/PNG format
+          </Text>
 
           {loading ? <ActivityIndicator /> : null}
 
