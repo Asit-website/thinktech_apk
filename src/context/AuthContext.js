@@ -46,9 +46,12 @@ export const AuthProvider = ({ children }) => {
   const verifyOtp = async (phone, otp) => {
     try {
       const response = await api.post('/auth/verify-otp', { phone, otp });
-      const { user: userData, token } = response.data;
+      const { user: userData, token, refreshToken } = response.data;
       
       await AsyncStorage.setItem('auth_token', token);
+      if (refreshToken) {
+        await AsyncStorage.setItem('refresh_token', refreshToken);
+      }
       await AsyncStorage.setItem('user', JSON.stringify(userData));
       setUser(userData);
       
@@ -60,11 +63,15 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      await api.post('/auth/logout');
+      const storedRefreshToken = await AsyncStorage.getItem('refresh_token');
+      if (storedRefreshToken) {
+        await api.post('/auth/logout-mobile', { refreshToken: storedRefreshToken });
+      }
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
       await AsyncStorage.removeItem('auth_token');
+      await AsyncStorage.removeItem('refresh_token');
       await AsyncStorage.removeItem('user');
       setUser(null);
     }

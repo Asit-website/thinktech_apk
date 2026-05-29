@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, TextInput, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getMyProfile, updateMyProfile } from '../config/api';
+import api, { getMyProfile, updateMyProfile } from '../config/api';
 import { notifyError, notifySuccess } from '../utils/notify';
 import * as Updates from 'expo-updates';
 import { Alert } from 'react-native';
@@ -54,9 +54,19 @@ export default function AccountSettingsScreen({ navigation }) {
   };
 
   const onLogout = async () => {
-    await AsyncStorage.removeItem('auth_token');
-    await AsyncStorage.removeItem('user');
-    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+    try {
+      const storedRefreshToken = await AsyncStorage.getItem('refresh_token');
+      if (storedRefreshToken) {
+        await api.post('/auth/logout-mobile', { refreshToken: storedRefreshToken });
+      }
+    } catch (e) {
+      console.log('Logout API failed:', e);
+    } finally {
+      await AsyncStorage.removeItem('auth_token');
+      await AsyncStorage.removeItem('refresh_token');
+      await AsyncStorage.removeItem('user');
+      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+    }
   };
 
   const onCheckUpdate = async () => {

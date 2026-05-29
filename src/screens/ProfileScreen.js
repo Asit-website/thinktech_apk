@@ -3,7 +3,7 @@ import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ScrollVi
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import BottomNav from '../components/BottomNav';
-import { getMyProfile, updateMyProfile, uploadMyProfilePhoto, listMyLeaveRequests, getAttendanceStatus } from '../config/api';
+import api, { getMyProfile, updateMyProfile, uploadMyProfilePhoto, listMyLeaveRequests, getAttendanceStatus } from '../config/api';
 import { notifyError, notifyInfo, notifySuccess } from '../utils/notify';
 
 export default function ProfileScreen({ navigation }) {
@@ -192,9 +192,19 @@ export default function ProfileScreen({ navigation }) {
   };
 
   const onLogout = async () => {
-    await AsyncStorage.removeItem('auth_token');
-    await AsyncStorage.removeItem('user');
-    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+    try {
+      const storedRefreshToken = await AsyncStorage.getItem('refresh_token');
+      if (storedRefreshToken) {
+        await api.post('/auth/logout-mobile', { refreshToken: storedRefreshToken });
+      }
+    } catch (e) {
+      console.log('Logout API failed:', e);
+    } finally {
+      await AsyncStorage.removeItem('auth_token');
+      await AsyncStorage.removeItem('refresh_token');
+      await AsyncStorage.removeItem('user');
+      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+    }
   };
 
   return (

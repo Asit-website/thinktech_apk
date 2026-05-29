@@ -52,14 +52,79 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor for error handling
+// Background refresh queue handling
+let isRefreshing = false;
+let failedQueue = [];
+
+const processQueue = (error, token = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
+
+// Response interceptor for automatic transparent token refresh
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error.response?.status === 401) {
-      await AsyncStorage.removeItem('auth_token');
-      await AsyncStorage.removeItem('user');
-      // Navigate to login - handled by AuthContext
+    const originalRequest = error.config;
+
+    // Trigger refresh only on 401 Unauthorized errors and if it's not a retry already
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      // If the refresh endpoint itself failed, clear credentials
+      if (originalRequest.url && originalRequest.url.includes('/auth/refresh-mobile')) {
+        await AsyncStorage.removeItem('auth_token');
+        await AsyncStorage.removeItem('refresh_token');
+        await AsyncStorage.removeItem('user');
+        return Promise.reject(error);
+      }
+
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then((token) => {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            return api(originalRequest);
+          })
+          .catch((err) => Promise.reject(err));
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        const storedRefreshToken = await AsyncStorage.getItem('refresh_token');
+        if (!storedRefreshToken) {
+          throw new Error('Refresh token missing');
+        }
+
+        const resp = await axios.post(`${API_BASE_URL}/auth/refresh-mobile`, {
+          refreshToken: storedRefreshToken
+        });
+
+        const { token, refreshToken } = resp.data;
+
+        await AsyncStorage.setItem('auth_token', String(token));
+        await AsyncStorage.setItem('refresh_token', String(refreshToken));
+
+        originalRequest.headers.Authorization = `Bearer ${token}`;
+
+        processQueue(null, token);
+        return api(originalRequest);
+      } catch (refreshError) {
+        processQueue(refreshError, null);
+        await AsyncStorage.removeItem('auth_token');
+        await AsyncStorage.removeItem('refresh_token');
+        await AsyncStorage.removeItem('user');
+        return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
+      }
     }
     return Promise.reject(error);
   }
@@ -93,6 +158,9 @@ export async function verifyOtp(phone, code) {
 
   if (data?.success && data?.token) {
     await AsyncStorage.setItem('auth_token', String(data.token));
+    if (data?.refreshToken) {
+      await AsyncStorage.setItem('refresh_token', String(data.refreshToken));
+    }
     if (data?.user) {
       await AsyncStorage.setItem('user', JSON.stringify(data.user));
     }
