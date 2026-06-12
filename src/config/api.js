@@ -22,6 +22,19 @@ api.interceptors.request.use(
     }
     config.headers['X-App-Platform'] = 'mobile-apk';
 
+    // Zero Trust device fingerprint generation and injection
+    let deviceFingerprint = await AsyncStorage.getItem('device_fingerprint');
+    if (!deviceFingerprint) {
+      const chars = 'abcdef0123456789';
+      let hex = '';
+      for (let i = 0; i < 32; i++) {
+        hex += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      deviceFingerprint = hex;
+      await AsyncStorage.setItem('device_fingerprint', deviceFingerprint);
+    }
+    config.headers['x-device-fingerprint'] = deviceFingerprint;
+
     // Handle FormData requests - set multipart/form-data explicitly
     if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
       console.log('FormData detected, setting multipart/form-data');
@@ -875,6 +888,31 @@ export async function submitExpense({ expenseType, expenseDate, amount, billNumb
   }
 
   const resp = await api.post('/me/expenses', form);
+  return resp.data;
+}
+
+export async function updateExpense(id, { expenseType, expenseDate, amount, billNumber, description, attachment } = {}) {
+  const form = new FormData();
+  if (expenseType) form.append('expenseType', expenseType);
+  if (expenseDate) form.append('expenseDate', typeof expenseDate === 'string' ? expenseDate : new Date(expenseDate).toISOString());
+  if (amount !== undefined) form.append('amount', String(Number(amount) || 0));
+  if (billNumber) form.append('billNumber', billNumber);
+  if (description) form.append('description', description);
+
+  if (attachment && attachment.uri) {
+    const name = attachment.name || (attachment.uri.split('/').pop() || 'attachment');
+    const type = attachment.type || 'application/octet-stream';
+    if (Platform.OS === 'web') {
+      const r = await fetch(attachment.uri);
+      const blob = await r.blob();
+      const webFile = new File([blob], name, { type: blob.type || type });
+      form.append('attachment', webFile);
+    } else {
+      form.append('attachment', { uri: attachment.uri, name, type });
+    }
+  }
+
+  const resp = await api.put(`/me/expenses/${id}`, form);
   return resp.data;
 }
 
