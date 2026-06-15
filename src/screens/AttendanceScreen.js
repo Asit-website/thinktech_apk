@@ -276,24 +276,36 @@ export default function AttendanceScreen({ navigation }) {
     const uri = null;
     setLoading(true);
     try {
-      // Capture coordinates (foreground permission is guaranteed to be granted here)
+      // Capture coordinates with a 6-second timeout and last known position fallback
       let coords = null;
       try {
         console.log('[PunchIn] Getting active position coordinates...');
         const Location = await import('expo-location');
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        let addr = null;
-        try {
-          const rev = await Location.reverseGeocodeAsync({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
-          addr = formatAddress(rev?.[0]);
-        } catch (_) { }
+        
+        const loc = await Promise.race([
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Location timeout')), 6000))
+        ]).catch(async (err) => {
+          console.warn('[PunchIn] getCurrentPositionAsync failed/timed out, trying last known position...', err);
+          return await Location.getLastKnownPositionAsync({});
+        });
 
-        coords = {
-          lat: loc.coords.latitude,
-          lng: loc.coords.longitude,
-          accuracy: loc.coords.accuracy,
-          address: addr
-        };
+        if (loc && loc.coords) {
+          let addr = null;
+          try {
+            addr = await Promise.race([
+              Location.reverseGeocodeAsync({ latitude: loc.coords.latitude, longitude: loc.coords.longitude }),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Geocode timeout')), 3000))
+            ]).then(rev => formatAddress(rev?.[0])).catch(() => null);
+          } catch (_) { }
+
+          coords = {
+            lat: loc.coords.latitude,
+            lng: loc.coords.longitude,
+            accuracy: loc.coords.accuracy,
+            address: addr
+          };
+        }
       } catch (err) {
         console.warn('[PunchIn] Failed to fetch coordinates, continuing punch-in:', err);
       }
@@ -330,7 +342,7 @@ export default function AttendanceScreen({ navigation }) {
           data: { photoUri: uri, coords },
         });
         if (queued) {
-          notifySuccess('Punch-in recorded successfully.');
+          notifyInfo('Punch-in saved offline (internet lag). Will sync automatically when online.');
           setPendingSyncCount(prev => prev + 1);
           await loadStatus();
         } else {
@@ -375,25 +387,36 @@ export default function AttendanceScreen({ navigation }) {
 
     setLoading(true);
     try {
-      // Request location permission and capture coordinates
+      // Request location permission and capture coordinates with 6-second timeout
       let coords = null;
       try {
         const Location = await import('expo-location');
         const { status: perm } = await Location.requestForegroundPermissionsAsync();
         if (perm === 'granted') {
-          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-          let addr = null;
-          try {
-            const rev = await Location.reverseGeocodeAsync({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
-            addr = formatAddress(rev?.[0]);
-          } catch (_) { }
+          const loc = await Promise.race([
+            Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Location timeout')), 6000))
+          ]).catch(async (err) => {
+            console.warn('[PunchOut] getCurrentPositionAsync failed/timed out, trying last known position...', err);
+            return await Location.getLastKnownPositionAsync({});
+          });
 
-          coords = {
-            lat: loc.coords.latitude,
-            lng: loc.coords.longitude,
-            accuracy: loc.coords.accuracy,
-            address: addr
-          };
+          if (loc && loc.coords) {
+            let addr = null;
+            try {
+              addr = await Promise.race([
+                Location.reverseGeocodeAsync({ latitude: loc.coords.latitude, longitude: loc.coords.longitude }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Geocode timeout')), 3000))
+              ]).then(rev => formatAddress(rev?.[0])).catch(() => null);
+            } catch (_) { }
+
+            coords = {
+              lat: loc.coords.latitude,
+              lng: loc.coords.longitude,
+              accuracy: loc.coords.accuracy,
+              address: addr
+            };
+          }
         }
       } catch (_) { }
 
@@ -427,7 +450,7 @@ export default function AttendanceScreen({ navigation }) {
           data: { photoUri: uri, coords },
         });
         if (queued) {
-          notifySuccess('Punch-out recorded successfully.');
+          notifyInfo('Punch-out saved offline (internet lag). Will sync automatically when online.');
           setPendingSyncCount(prev => prev + 1);
           await loadStatus();
         } else {

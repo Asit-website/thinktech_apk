@@ -146,10 +146,28 @@ class SyncService {
               case 'PUNCH_IN':
                 const resIn = await punchInWithPhoto(item.data.photoUri, item.data.coords);
                 success = resIn?.success;
+                if (success) {
+                  try {
+                    const { locationTrackingService } = require('./locationService');
+                    await locationTrackingService.startTracking();
+                    console.log('Background location tracking started after offline punch-in sync.');
+                  } catch (e) {
+                    console.error('Failed to start tracking after offline sync:', e);
+                  }
+                }
                 break;
               case 'PUNCH_OUT':
                 const resOut = await punchOutWithPhoto(item.data.photoUri, item.data.coords);
                 success = resOut?.success;
+                if (success) {
+                  try {
+                    const { locationTrackingService } = require('./locationService');
+                    await locationTrackingService.stopTracking();
+                    console.log('Background location tracking stopped after offline punch-out sync.');
+                  } catch (e) {
+                    console.error('Failed to stop tracking after offline sync:', e);
+                  }
+                }
                 break;
               case 'START_BREAK':
                 const resSB = await startBreak();

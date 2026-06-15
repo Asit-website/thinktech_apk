@@ -131,9 +131,19 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError, null);
-        await AsyncStorage.removeItem('auth_token');
-        await AsyncStorage.removeItem('refresh_token');
-        await AsyncStorage.removeItem('user');
+        
+        // Check if the error is a temporary network issue
+        const isNetworkError = !refreshError.response || 
+                               refreshError.message?.includes('Network Error') || 
+                               refreshError.code === 'ERR_NETWORK' ||
+                               refreshError.code === 'ECONNABORTED';
+
+        if (!isNetworkError) {
+          // Only clear session when the server explicitly rejects the refresh token (e.g., expired or invalid)
+          await AsyncStorage.removeItem('auth_token');
+          await AsyncStorage.removeItem('refresh_token');
+          await AsyncStorage.removeItem('user');
+        }
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
