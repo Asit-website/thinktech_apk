@@ -3,11 +3,26 @@ import { SafeAreaView, View, Text, StyleSheet, Image, TouchableOpacity, ScrollVi
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import BottomNav from '../components/BottomNav';
-import { endBreak, getAttendanceStatus, punchInWithPhoto, punchOutWithPhoto, startBreak, listMyLeaveRequests, getMyLeaveCategories, getMyProfile } from '../config/api';
+import { endBreak, getAttendanceStatus, punchInWithPhoto, punchOutWithPhoto, startBreak, listMyLeaveRequests, getMyLeaveCategories, getMyProfile, API_BASE_URL } from '../config/api';
 import { formatAddress, locationTrackingService } from '../services/locationService';
 // NOTE: Avoid static import of expo-location on web to prevent bundler crash; use dynamic import when needed
 import { notifyError, notifyInfo, notifySuccess } from '../utils/notify';
 import { syncService } from '../services/syncService';
+
+const checkConnectivity = async () => {
+  try {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 2000); // 2 second timeout
+    const resp = await fetch(`${API_BASE_URL}/`, {
+      method: 'GET',
+      signal: controller.signal
+    });
+    clearTimeout(id);
+    return resp.ok || resp.status < 500;
+  } catch (err) {
+    return false;
+  }
+};
 
 export default function AttendanceScreen({ navigation }) {
   const [status, setStatus] = useState(null);
@@ -28,11 +43,14 @@ export default function AttendanceScreen({ navigation }) {
   const loadStatus = async () => {
     try {
       setRefreshing(true);
+      const pendingCount = await syncService.getPendingCount();
       const res = await getAttendanceStatus();
       if (res?.success) {
         console.log('Attendance status response:', JSON.stringify(res.status, null, 2));
-        setStatus(res.status);
-        await syncService.setServerStatus(res.status);
+        if (pendingCount === 0) {
+          setStatus(res.status);
+          await syncService.setServerStatus(res.status);
+        }
         syncService.resetNetworkFailed();
       }
     } catch (e) {
@@ -79,17 +97,21 @@ export default function AttendanceScreen({ navigation }) {
     loadStatus();
     loadLeaveBalance();
 
-    // Initial sync and count check
-    syncService.sync().then(() => {
-      syncService.getPendingCount().then(setPendingSyncCount);
-    });
+    const runSyncAndLoad = async () => {
+      try {
+        await syncService.sync();
+      } catch (syncErr) {
+        console.error('Periodic sync failed:', syncErr);
+      }
+      await loadStatus();
+      const count = await syncService.getPendingCount();
+      setPendingSyncCount(count);
+    };
 
-    const t = setInterval(() => {
-      loadStatus();
-      syncService.getPendingCount().then(setPendingSyncCount);
-      // Try to sync periodically if items pending
-      syncService.sync();
-    }, 10000);
+    // Initial sync and count check
+    runSyncAndLoad();
+
+    const t = setInterval(runSyncAndLoad, 10000);
     return () => clearInterval(t);
   }, []);
 
@@ -274,10 +296,15 @@ export default function AttendanceScreen({ navigation }) {
   const performPunchInActual = async () => {
     console.log('[PunchIn] Starting punch-in sequence...');
     const uri = null;
+    let coords = null;
     setLoading(true);
     try {
+      const isOnline = await checkConnectivity();
+      if (!isOnline) {
+        console.log('[PunchIn] Offline detected via connectivity check, failing fast.');
+        throw { code: 'ERR_NETWORK', message: 'Network Error' };
+      }
       // Capture coordinates with a 6-second timeout and last known position fallback
-      let coords = null;
       try {
         console.log('[PunchIn] Getting active position coordinates...');
         const Location = await import('expo-location');
@@ -336,17 +363,43 @@ export default function AttendanceScreen({ navigation }) {
         notifyError(res?.message || 'Punch-in failed. Please try again.');
       }
     } catch (e) {
-      if (!e.response || e.message?.includes('Network') || e.code === 'ERR_NETWORK' || e.code === 'NETWORK_ERROR') {
-        const queued = await syncService.addToQueue({
-          type: 'PUNCH_IN',
-          data: { photoUri: uri, coords },
-        });
-        if (queued) {
-          notifyInfo('Punch-in saved offline (internet lag). Will sync automatically when online.');
-          setPendingSyncCount(prev => prev + 1);
-          await loadStatus();
-        } else {
-          notifyError('Failed to save offline punch-in.');
+      console.log('[PunchIn] Caught error in punch-in:', JSON.stringify(e));
+      const isOfflineError = !e.response || 
+        e.code === 'ERR_NETWORK' || 
+        e.code === 'NETWORK_ERROR' || 
+        e.code === 'ECONNABORTED' || 
+        e.message?.includes('Network') || 
+        e.message?.includes('timeout') ||
+        (e.response?.status >= 500 && e.response?.status <= 599) ||
+        e.response?.status === 408;
+
+      console.log('[PunchIn] isOfflineError check resolved to:', isOfflineError);
+
+      if (isOfflineError) {
+        try {
+          const queued = await syncService.addToQueue({
+            type: 'PUNCH_IN',
+            data: { photoUri: uri, coords },
+          });
+          console.log('[PunchIn] addToQueue resolved to:', queued);
+          if (queued) {
+            if (Platform.OS === 'web') {
+              alert('Punch-in saved offline (internet lag). Will sync automatically when online.');
+            } else {
+              console.log('[PunchIn] Triggering native Alert.alert');
+              Alert.alert('Offline Check-in', 'Your punch-in has been saved offline. It will sync automatically when you are back online.');
+            }
+            setPendingSyncCount(prev => prev + 1);
+            await loadStatus();
+          } else {
+            if (Platform.OS === 'web') {
+              alert('Failed to save offline punch-in.');
+            } else {
+              Alert.alert('Offline Error', 'Failed to save offline punch-in.');
+            }
+          }
+        } catch (innerErr) {
+          console.error('[PunchIn] Uncaught queue handling error:', innerErr);
         }
       } else {
         notifyError(e?.response?.data?.message || 'Punch-in failed. Please try again.');
@@ -384,11 +437,15 @@ export default function AttendanceScreen({ navigation }) {
     // const uri = await pickPhoto();
     // if (!uri) return;
 
-
+    let coords = null;
     setLoading(true);
     try {
+      const isOnline = await checkConnectivity();
+      if (!isOnline) {
+        console.log('[PunchOut] Offline detected via connectivity check, failing fast.');
+        throw { code: 'ERR_NETWORK', message: 'Network Error' };
+      }
       // Request location permission and capture coordinates with 6-second timeout
-      let coords = null;
       try {
         const Location = await import('expo-location');
         const { status: perm } = await Location.requestForegroundPermissionsAsync();
@@ -444,17 +501,43 @@ export default function AttendanceScreen({ navigation }) {
         notifyError(res?.message || 'Punch-out failed. Please try again.');
       }
     } catch (e) {
-      if (!e.response || e.message?.includes('Network') || e.code === 'ERR_NETWORK' || e.code === 'NETWORK_ERROR') {
-        const queued = await syncService.addToQueue({
-          type: 'PUNCH_OUT',
-          data: { photoUri: uri, coords },
-        });
-        if (queued) {
-          notifyInfo('Punch-out saved offline (internet lag). Will sync automatically when online.');
-          setPendingSyncCount(prev => prev + 1);
-          await loadStatus();
-        } else {
-          notifyError('Failed to save offline punch-out.');
+      console.log('[PunchOut] Caught error in punch-out:', JSON.stringify(e));
+      const isOfflineError = !e.response || 
+        e.code === 'ERR_NETWORK' || 
+        e.code === 'NETWORK_ERROR' || 
+        e.code === 'ECONNABORTED' || 
+        e.message?.includes('Network') || 
+        e.message?.includes('timeout') ||
+        (e.response?.status >= 500 && e.response?.status <= 599) ||
+        e.response?.status === 408;
+
+      console.log('[PunchOut] isOfflineError check resolved to:', isOfflineError);
+
+      if (isOfflineError) {
+        try {
+          const queued = await syncService.addToQueue({
+            type: 'PUNCH_OUT',
+            data: { photoUri: uri, coords },
+          });
+          console.log('[PunchOut] addToQueue resolved to:', queued);
+          if (queued) {
+            if (Platform.OS === 'web') {
+              alert('Punch-out saved offline (internet lag). Will sync automatically when online.');
+            } else {
+              console.log('[PunchOut] Triggering native Alert.alert');
+              Alert.alert('Offline Check-out', 'Your punch-out has been saved offline. It will sync automatically when you are back online.');
+            }
+            setPendingSyncCount(prev => prev + 1);
+            await loadStatus();
+          } else {
+            if (Platform.OS === 'web') {
+              alert('Failed to save offline punch-out.');
+            } else {
+              Alert.alert('Offline Error', 'Failed to save offline punch-out.');
+            }
+          }
+        } catch (innerErr) {
+          console.error('[PunchOut] Uncaught queue handling error:', innerErr);
         }
       } else {
         notifyError(e?.response?.data?.message || 'Punch-out failed. Please try again.');
@@ -467,6 +550,11 @@ export default function AttendanceScreen({ navigation }) {
   const onToggleBreak = async () => {
     setLoading(true);
     try {
+      const isOnline = await checkConnectivity();
+      if (!isOnline) {
+        console.log('[Break] Offline detected via connectivity check, failing fast.');
+        throw { code: 'ERR_NETWORK', message: 'Network Error' };
+      }
       const res = isOnBreak ? await endBreak() : await startBreak();
       if (res?.success) {
         await loadStatus();
@@ -475,11 +563,29 @@ export default function AttendanceScreen({ navigation }) {
         notifyError(res?.message || 'Unable to update break status. Please try again.');
       }
     } catch (e) {
-      if (!e.response || e.message?.includes('Network') || e.code === 'ERR_NETWORK' || e.code === 'NETWORK_ERROR') {
+      const isOfflineError = !e.response || 
+        e.code === 'ERR_NETWORK' || 
+        e.code === 'NETWORK_ERROR' || 
+        e.code === 'ECONNABORTED' || 
+        e.message?.includes('Network') || 
+        e.message?.includes('timeout') ||
+        (e.response?.status >= 500 && e.response?.status <= 599) ||
+        e.response?.status === 408;
+
+      if (isOfflineError) {
         const type = isOnBreak ? 'END_BREAK' : 'START_BREAK';
         const queued = await syncService.addToQueue({ type, data: {} });
         if (queued) {
-          notifySuccess(isOnBreak ? 'Break ended successfully.' : 'Break started successfully.');
+          if (Platform.OS === 'web') {
+            alert(isOnBreak ? 'Break ended offline. Will sync when online.' : 'Break started offline. Will sync when online.');
+          } else {
+            Alert.alert(
+              'Offline Break Update',
+              isOnBreak 
+                ? 'Your break-end has been saved offline. It will sync automatically when you are back online.' 
+                : 'Your break-start has been saved offline. It will sync automatically when you are back online.'
+            );
+          }
           setPendingSyncCount(prev => prev + 1);
           await loadStatus();
         }

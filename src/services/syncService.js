@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
-import { punchInWithPhoto, punchOutWithPhoto, startBreak, endBreak } from '../config/api';
+import { punchInWithPhoto, punchOutWithPhoto, startBreak, endBreak, getAttendanceStatus } from '../config/api';
 
 const SYNC_QUEUE_KEY = 'offline_sync_queue';
 const OFFLINE_STATUS_KEY = 'offline_attendance_status';
@@ -24,19 +24,36 @@ class SyncService {
    * @param {Object} item { type: 'PUNCH_IN'|'PUNCH_OUT'|'START_BREAK'|'END_BREAK', data: {}, timestamp: Date }
    */
   async addToQueue(item) {
+    console.log('[SyncService] addToQueue started');
     try {
-      const queueJson = await AsyncStorage.getItem(SYNC_QUEUE_KEY);
-      const queue = queueJson ? JSON.parse(queueJson) : [];
+      let queue = [];
+      try {
+        console.log('[SyncService] Reading SYNC_QUEUE_KEY');
+        const queueJson = await AsyncStorage.getItem(SYNC_QUEUE_KEY);
+        console.log('[SyncService] Raw queue JSON:', queueJson);
+        queue = queueJson ? JSON.parse(queueJson) : [];
+        if (!Array.isArray(queue)) {
+          queue = [];
+        }
+      } catch (parseError) {
+        console.error('Failed to parse sync queue, resetting:', parseError);
+        queue = [];
+      }
       
       // If item has a photo, save it locally to a permanent location
       if (item.data && item.data.photoUri) {
-        const fileName = `offline_${Date.now()}_${item.type.toLowerCase()}.jpg`;
-        const localPath = `${FileSystem.documentDirectory}${fileName}`;
-        await FileSystem.copyAsync({
-          from: item.data.photoUri,
-          to: localPath
-        });
-        item.data.photoUri = localPath; // Update URI to local path
+        console.log('[SyncService] Processing photo:', item.data.photoUri);
+        try {
+          const fileName = `offline_${Date.now()}_${item.type.toLowerCase()}.jpg`;
+          const localPath = `${FileSystem.documentDirectory}${fileName}`;
+          await FileSystem.copyAsync({
+            from: item.data.photoUri,
+            to: localPath
+          });
+          item.data.photoUri = localPath; // Update URI to local path
+        } catch (photoError) {
+          console.error('Failed to copy offline photo, proceeding with original URI:', photoError);
+        }
       }
 
       queue.push({
@@ -45,11 +62,14 @@ class SyncService {
         createdAt: new Date().toISOString()
       });
 
+      console.log('[SyncService] Saving queue');
       await AsyncStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(queue));
       
       // Update local status so UI reflects the change immediately
+      console.log('[SyncService] Updating local status');
       await this.updateLocalStatus(item);
       
+      console.log('[SyncService] addToQueue finishing');
       return true;
     } catch (error) {
       console.error('Failed to add to sync queue:', error);
@@ -61,15 +81,27 @@ class SyncService {
    * Update the cached attendance status based on an offline action
    */
   async updateLocalStatus(item) {
+    console.log('[SyncService] updateLocalStatus started');
     try {
+      console.log('[SyncService] Reading OFFLINE_STATUS_KEY');
       const statusJson = await AsyncStorage.getItem(OFFLINE_STATUS_KEY);
-      let status = statusJson ? JSON.parse(statusJson) : {
-        punchedInAt: null,
-        punchedOutAt: null,
-        isOnBreak: false,
-        workingSeconds: 0,
-        breakSeconds: 0
-      };
+      console.log('[SyncService] Raw status JSON:', statusJson);
+      let status;
+      try {
+        status = statusJson ? JSON.parse(statusJson) : null;
+      } catch (parseErr) {
+        console.error('Failed to parse local status JSON, resetting:', parseErr);
+        status = null;
+      }
+      if (!status || typeof status !== 'object') {
+        status = {
+          punchedInAt: null,
+          punchedOutAt: null,
+          isOnBreak: false,
+          workingSeconds: 0,
+          breakSeconds: 0
+        };
+      }
 
       const nowIso = new Date().toISOString();
 
@@ -93,7 +125,9 @@ class SyncService {
           break;
       }
 
+      console.log('[SyncService] Saving OFFLINE_STATUS_KEY');
       await AsyncStorage.setItem(OFFLINE_STATUS_KEY, JSON.stringify(status));
+      console.log('[SyncService] updateLocalStatus completed');
     } catch (error) {
       console.error('Failed to update local status:', error);
     }
@@ -132,8 +166,18 @@ class SyncService {
     this.isSyncing = true;
 
     try {
-      const queueJson = await AsyncStorage.getItem(SYNC_QUEUE_KEY);
-      let queue = queueJson ? JSON.parse(queueJson) : [];
+      let queue = [];
+      try {
+        const queueJson = await AsyncStorage.getItem(SYNC_QUEUE_KEY);
+        queue = queueJson ? JSON.parse(queueJson) : [];
+        if (!Array.isArray(queue)) {
+          queue = [];
+        }
+      } catch (parseErr) {
+        console.error('Failed to parse sync queue in sync(), resetting:', parseErr);
+        queue = [];
+        await AsyncStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify([]));
+      }
 
       if (queue.length > 0) {
         console.log(`Starting sync for ${queue.length} items...`);
@@ -191,16 +235,46 @@ class SyncService {
             }
           } catch (error) {
             console.error(`Sync failed for item ${item.id}:`, error.message);
-            remainingQueue.push(item);
-            // If it's a network error (or server offline), stop syncing for now
-            if (!error.response || error.message.includes('Network') || error.code === 'ERR_NETWORK' || error.code === 'NETWORK_ERROR') {
-               this.networkFailed = true;
-               break;
+            
+            const isTemporaryError = !error.response || 
+              error.code === 'ERR_NETWORK' || 
+              error.code === 'NETWORK_ERROR' || 
+              error.code === 'ECONNABORTED' || 
+              error.message?.includes('Network') || 
+              error.message?.includes('timeout') ||
+              error.response?.status === 408 ||
+              error.response?.status === 429 ||
+              (error.response?.status >= 500 && error.response?.status <= 599);
+
+            if (isTemporaryError) {
+              remainingQueue.push(item);
+              this.networkFailed = true;
+              break; // Stop syncing remaining items since network/server is down
+            } else {
+              console.warn(`Discarding item ${item.id} due to permanent API error:`, error.response?.status);
+              // Clean up local photo since we are discarding the item
+              if (item.data && item.data.photoUri && item.data.photoUri.startsWith('file://')) {
+                try {
+                  await FileSystem.deleteAsync(item.data.photoUri, { idempotent: true });
+                } catch (e) {}
+              }
             }
           }
         }
 
         await AsyncStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(remainingQueue));
+
+        // If the queue has been successfully cleared, refresh the local cache status
+        if (remainingQueue.length === 0) {
+          try {
+            const statusRes = await getAttendanceStatus();
+            if (statusRes?.success) {
+              await this.setServerStatus(statusRes.status);
+            }
+          } catch (statusError) {
+            console.error('Failed to refresh status after successful sync:', statusError.message);
+          }
+        }
       }
 
       // Sync offline location pings too if network is still fine
@@ -222,7 +296,18 @@ class SyncService {
       const pingsJson = await AsyncStorage.getItem('offline_location_pings');
       if (!pingsJson) return;
       
-      const pings = JSON.parse(pingsJson);
+      let pings = [];
+      try {
+        pings = JSON.parse(pingsJson);
+        if (!Array.isArray(pings)) {
+          pings = [];
+        }
+      } catch (parseErr) {
+        console.error('Failed to parse offline location pings, resetting:', parseErr);
+        await AsyncStorage.setItem('offline_location_pings', JSON.stringify([]));
+        return;
+      }
+      
       if (pings.length === 0) return;
       
       console.log(`Starting sync for ${pings.length} offline location pings...`);
@@ -245,18 +330,29 @@ class SyncService {
           });
         } catch (error) {
           console.error('Failed to sync offline location ping:', error.message);
-          remainingPings.push(ping);
           
-          const isNetworkError = !error.response || error.code === 'ERR_NETWORK' || error.message?.includes('Network');
-          if (isNetworkError) {
+          const isTemporaryError = !error.response || 
+            error.code === 'ERR_NETWORK' || 
+            error.code === 'NETWORK_ERROR' || 
+            error.code === 'ECONNABORTED' || 
+            error.message?.includes('Network') || 
+            error.message?.includes('timeout') ||
+            error.response?.status === 408 ||
+            error.response?.status === 429 ||
+            (error.response?.status >= 500 && error.response?.status <= 599);
+
+          if (isTemporaryError) {
+            remainingPings.push(ping);
             this.networkFailed = true;
             break; // Stop syncing since network failed again
+          } else {
+            console.warn('Discarding offline location ping due to permanent error status:', error.response?.status);
           }
         }
       }
       
       await AsyncStorage.setItem('offline_location_pings', JSON.stringify(remainingPings));
-      console.log(`Offline location sync completed. Remaining: ${remainingPings.length}`);
+      console.log('Offline location sync completed. Remaining:', remainingPings.length);
     } catch (error) {
       console.error('Error syncing offline location pings:', error);
     }
@@ -270,7 +366,7 @@ class SyncService {
       const queueJson = await AsyncStorage.getItem(SYNC_QUEUE_KEY);
       if (!queueJson) return 0;
       const queue = JSON.parse(queueJson);
-      return queue.length;
+      return Array.isArray(queue) ? queue.length : 0;
     } catch (error) {
       return 0;
     }

@@ -215,6 +215,16 @@ export async function getWeeklyAttendance(startDate, endDate) {
   return resp.data; // This returns { success: true, data: {...} }
 }
 
+export async function getSessionSummary() {
+  const resp = await api.get('/me/session-summary');
+  return resp.data;
+}
+
+export async function getSessionEvents() {
+  const resp = await api.get('/me/session-events');
+  return resp.data;
+}
+
 export async function setMaxBreakDuration(maxBreakMinutes) {
   const resp = await api.put('/attendance/settings/max-break', { maxBreakMinutes });
   return resp.data;
@@ -229,6 +239,7 @@ export async function punchInWithPhoto(photoUri, coords) {
   console.log('punchInWithPhoto called with URI:', photoUri);
 
   const form = new FormData();
+  form.append('platform', Platform.OS);
 
   if (photoUri) {
     if (Platform.OS === 'web') {
@@ -273,7 +284,7 @@ export async function punchInWithPhoto(photoUri, coords) {
     return resp.data;
   } catch (error) {
     // Try with explicit multipart content type as fallback (this is crucial!)
-    if (error.code === 'NETWORK_ERROR' || error.message.includes('Network Error')) {
+    if (error.code === 'NETWORK_ERROR' || error.code === 'ERR_NETWORK' || error.message?.includes('Network Error') || error.message?.includes('Network request failed')) {
       try {
         const token = await AsyncStorage.getItem('auth_token');
         const directApi = axios.create({
@@ -302,6 +313,7 @@ export async function punchOutWithPhoto(photoUri, coords) {
   console.log('punchOutWithPhoto called with URI:', photoUri);
 
   const form = new FormData();
+  form.append('platform', Platform.OS);
 
   if (photoUri) {
     if (Platform.OS === 'web') {
@@ -346,7 +358,7 @@ export async function punchOutWithPhoto(photoUri, coords) {
     return resp.data;
   } catch (error) {
     // Try with explicit multipart content type as fallback (this is crucial!)
-    if (error.code === 'NETWORK_ERROR' || error.message.includes('Network Error')) {
+    if (error.code === 'NETWORK_ERROR' || error.code === 'ERR_NETWORK' || error.message?.includes('Network Error') || error.message?.includes('Network request failed')) {
       try {
         const token = await AsyncStorage.getItem('auth_token');
         const directApi = axios.create({
@@ -699,7 +711,7 @@ export async function submitVisitForm({
     console.error('Error config:', error.config);
 
     // Try with explicit multipart content type as fallback (same as punch-in)
-    if (error.code === 'NETWORK_ERROR' || error.message.includes('Network Error')) {
+    if (error.code === 'NETWORK_ERROR' || error.code === 'ERR_NETWORK' || error.message?.includes('Network Error') || error.message?.includes('Network request failed')) {
       console.log('Trying visit form with explicit multipart content type...');
       try {
         const token = await AsyncStorage.getItem('auth_token');
@@ -847,7 +859,7 @@ export async function submitOrder({
     console.error('Error config:', error.config);
 
     // Try with explicit multipart content type as fallback (this is crucial!)
-    if (error.code === 'NETWORK_ERROR' || error.message.includes('Network Error') || error.response?.status === 415) {
+    if (error.code === 'NETWORK_ERROR' || error.code === 'ERR_NETWORK' || error.message?.includes('Network Error') || error.message?.includes('Network request failed') || error.response?.status === 415) {
       console.log('Trying order with explicit multipart content type...');
       try {
         const token = await AsyncStorage.getItem('auth_token');
