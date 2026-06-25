@@ -1,5 +1,6 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import api from '../config/api';
 
 const AuthContext = createContext({});
@@ -62,10 +63,63 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
+    let locationData = {};
+    try {
+      if (Platform.OS !== 'web') {
+        const Location = require('expo-location');
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          let loc = null;
+          try {
+            loc = await Promise.race([
+              Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Location request timed out')), 8000))
+            ]);
+          } catch (err) {
+            console.log('getCurrentPositionAsync failed or timed out, trying last known position:', err.message);
+            try {
+              loc = await Location.getLastKnownPositionAsync();
+            } catch (lastErr) {
+              console.log('getLastKnownPositionAsync failed:', lastErr.message);
+            }
+          }
+
+          if (loc && loc.coords) {
+            locationData.latitude = loc.coords.latitude;
+            locationData.longitude = loc.coords.longitude;
+            locationData.accuracy = loc.coords.accuracy;
+            try {
+              const rev = await Promise.race([
+                Location.reverseGeocodeAsync({
+                  latitude: loc.coords.latitude,
+                  longitude: loc.coords.longitude
+                }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Reverse geocode timed out')), 5000))
+              ]);
+              if (rev && rev.length > 0) {
+                const { formatAddress } = require('../services/locationService');
+                locationData.address = formatAddress(rev[0]);
+              }
+            } catch (e) {
+              console.log('Reverse geocode failed during logout:', e.message);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.log('Failed to fetch location during logout:', e.message);
+    }
+
     try {
       const storedRefreshToken = await AsyncStorage.getItem('refresh_token');
       if (storedRefreshToken) {
-        await api.post('/auth/logout-mobile', { refreshToken: storedRefreshToken });
+        await api.post('/auth/logout-mobile', {
+          refreshToken: storedRefreshToken,
+          latitude: locationData.latitude,
+          longitude: locationData.longitude,
+          address: locationData.address,
+          accuracy: locationData.accuracy
+        });
       }
     } catch (error) {
       console.error('Logout error:', error);
