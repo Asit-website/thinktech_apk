@@ -183,7 +183,8 @@ export default function ApplyLeaveScreen({ navigation }) {
                 notifyError(res?.message || 'Unable to submit leave request. Please try again.');
               }
             } catch (e) {
-              notifyError('Unable to submit leave request. Please try again.');
+              const errMsg = e?.response?.data?.message || 'Unable to submit leave request. Please try again.';
+              notifyError(errMsg);
             } finally {
               setLoading(false);
             }

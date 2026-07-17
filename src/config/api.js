@@ -942,49 +942,98 @@ export async function submitOrder({
 }
 
 // Expenses (mobile: staff submit expenses)
-export async function submitExpense({ expenseType, expenseDate, amount, billNumber, description, attachment } = {}) {
+export async function submitExpense({ expenseType, expenseDate, expenses = [] } = {}) {
   const form = new FormData();
   if (expenseType) form.append('expenseType', expenseType);
   if (expenseDate) form.append('expenseDate', typeof expenseDate === 'string' ? expenseDate : new Date(expenseDate).toISOString());
-  if (amount !== undefined) form.append('amount', String(Number(amount) || 0));
-  if (billNumber) form.append('billNumber', billNumber);
-  if (description) form.append('description', description);
 
-  if (attachment && attachment.uri) {
-    const name = attachment.name || (attachment.uri.split('/').pop() || 'attachment');
-    const type = attachment.type || 'application/octet-stream';
-    if (Platform.OS === 'web') {
-      const r = await fetch(attachment.uri);
-      const blob = await r.blob();
-      const webFile = new File([blob], name, { type: blob.type || type });
-      form.append('attachment', webFile);
-    } else {
-      form.append('attachment', { uri: attachment.uri, name, type });
+  const serializedItems = await Promise.all(expenses.map(async (exp, index) => {
+    const item = {
+      expenseType: exp.expenseType || 'Other',
+      amount: Number(exp.amount || 0),
+      billNumber: exp.billNumber || null,
+      description: exp.description || null,
+    };
+    if (exp.expenseType === 'Travel') {
+      item.travelFrom = exp.travelFrom || null;
+      item.travelTo = exp.travelTo || null;
+      item.mode = exp.mode || null;
     }
-  }
+    const attachment = exp.attachment;
+    if (attachment && attachment.uri) {
+      const name = attachment.name || (attachment.uri.split('/').pop() || 'attachment');
+      const type = attachment.type || 'application/octet-stream';
+      if (Platform.OS === 'web') {
+        const r = await fetch(attachment.uri);
+        const blob = await r.blob();
+        const webFile = new File([blob], name, { type: blob.type || type });
+        form.append(`attachment_${index}`, webFile);
+      } else {
+        form.append(`attachment_${index}`, { uri: attachment.uri, name, type });
+      }
+    }
+    return item;
+  }));
+
+  form.append('items', JSON.stringify(serializedItems));
 
   const resp = await api.post('/me/expenses', form);
   return resp.data;
 }
 
-export async function updateExpense(id, { expenseType, expenseDate, amount, billNumber, description, attachment } = {}) {
+export async function updateExpense(id, { expenseType, expenseDate, expenses = [], amount, billNumber, description, attachment, travelFrom, travelTo, mode } = {}) {
   const form = new FormData();
   if (expenseType) form.append('expenseType', expenseType);
   if (expenseDate) form.append('expenseDate', typeof expenseDate === 'string' ? expenseDate : new Date(expenseDate).toISOString());
-  if (amount !== undefined) form.append('amount', String(Number(amount) || 0));
-  if (billNumber) form.append('billNumber', billNumber);
-  if (description) form.append('description', description);
 
-  if (attachment && attachment.uri) {
-    const name = attachment.name || (attachment.uri.split('/').pop() || 'attachment');
-    const type = attachment.type || 'application/octet-stream';
-    if (Platform.OS === 'web') {
-      const r = await fetch(attachment.uri);
-      const blob = await r.blob();
-      const webFile = new File([blob], name, { type: blob.type || type });
-      form.append('attachment', webFile);
-    } else {
-      form.append('attachment', { uri: attachment.uri, name, type });
+  if (Array.isArray(expenses) && expenses.length > 0) {
+    const serializedItems = await Promise.all(expenses.map(async (exp, index) => {
+      const item = {
+        expenseType: exp.expenseType || 'Other',
+        amount: Number(exp.amount || 0),
+        billNumber: exp.billNumber || null,
+        description: exp.description || null,
+      };
+      if (exp.expenseType === 'Travel') {
+        item.travelFrom = exp.travelFrom || null;
+        item.travelTo = exp.travelTo || null;
+        item.mode = exp.mode || null;
+      }
+      const att = exp.attachment;
+      if (att && att.uri) {
+        const name = att.name || (att.uri.split('/').pop() || 'attachment');
+        const type = att.type || 'application/octet-stream';
+        if (Platform.OS === 'web') {
+          const r = await fetch(att.uri);
+          const blob = await r.blob();
+          const webFile = new File([blob], name, { type: blob.type || type });
+          form.append(`attachment_${index}`, webFile);
+        } else {
+          form.append(`attachment_${index}`, { uri: att.uri, name, type });
+        }
+      }
+      return item;
+    }));
+    form.append('items', JSON.stringify(serializedItems));
+  } else {
+    if (amount !== undefined) form.append('amount', String(Number(amount) || 0));
+    if (billNumber) form.append('billNumber', billNumber);
+    if (description) form.append('description', description);
+    if (travelFrom) form.append('travelFrom', travelFrom);
+    if (travelTo) form.append('travelTo', travelTo);
+    if (mode) form.append('mode', mode);
+
+    if (attachment && attachment.uri) {
+      const name = attachment.name || (attachment.uri.split('/').pop() || 'attachment');
+      const type = attachment.type || 'application/octet-stream';
+      if (Platform.OS === 'web') {
+        const r = await fetch(attachment.uri);
+        const blob = await r.blob();
+        const webFile = new File([blob], name, { type: blob.type || type });
+        form.append('attachment', webFile);
+      } else {
+        form.append('attachment', { uri: attachment.uri, name, type });
+      }
     }
   }
 

@@ -24,17 +24,37 @@ export default function ExpenseScreen() {
     setCurrentPage(1);
   }, [activeTab]);
 
-  // Form states
-  const [expenseType, setExpenseType] = useState('Travel');
   const [showTypePicker, setShowTypePicker] = useState(false);
+  const [activeTypeIndex, setActiveTypeIndex] = useState(null);
   const [expenseDate, setExpenseDate] = useState(new Date());
   const [showDate, setShowDate] = useState(false);
-  const [amount, setAmount] = useState('');
-  const [billNumber, setBillNumber] = useState('');
-  const [description, setDescription] = useState('');
-  const [attachment, setAttachment] = useState(null);
   const [editingClaim, setEditingClaim] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [globalDescription, setGlobalDescription] = useState('');
+  const [expenseTypes, setExpenseTypes] = useState(['Travel','Food','Office Supplies','Fuel','Accommodation','Communication','Other']);
+  const [newTypeName, setNewTypeName] = useState('');
+
+  // Dynamic rows state
+  const [expenses, setExpenses] = useState([{ expenseType: 'Travel', amount: '', billNumber: '', description: '', attachment: null, travelFrom: '', travelTo: '', mode: 'Car' }]);
+  const [showModePicker, setShowModePicker] = useState(false);
+  const [activeModeIndex, setActiveModeIndex] = useState(null);
+  const activeUploadIndexRef = useRef(null);
+
+  const updateExpenseField = useCallback((index, field, value) => {
+    setExpenses(prev => {
+      const copy = [...prev];
+      copy[index] = { ...copy[index], [field]: value };
+      return copy;
+    });
+  }, []);
+
+  const addExpenseRow = () => {
+    setExpenses(prev => [...prev, { expenseType: 'Travel', amount: '', billNumber: '', description: '', attachment: null, travelFrom: '', travelTo: '', mode: 'Car' }]);
+  };
+
+  const removeExpenseRow = (index) => {
+    setExpenses(prev => prev.filter((_, idx) => idx !== index));
+  };
 
   const fetchClaims = useCallback(async (isRefresh = false) => {
     try {
@@ -57,12 +77,9 @@ export default function ExpenseScreen() {
   }, [fetchClaims]);
 
   const resetForm = () => {
-    setExpenseType('Travel');
     setExpenseDate(new Date());
-    setAmount('');
-    setBillNumber('');
-    setDescription('');
-    setAttachment(null);
+    setExpenses([{ expenseType: 'Travel', amount: '', billNumber: '', description: '', attachment: null, travelFrom: '', travelTo: '', mode: 'Car' }]);
+    setGlobalDescription('');
     setEditingClaim(null);
   };
 
@@ -72,12 +89,49 @@ export default function ExpenseScreen() {
       return;
     }
     setEditingClaim(claim);
-    setExpenseType(claim.expenseType || 'Travel');
     setExpenseDate(claim.expenseDate ? new Date(claim.expenseDate) : new Date());
-    setAmount(claim.amount !== undefined && claim.amount !== null ? String(claim.amount) : '');
-    setBillNumber(claim.billNumber || '');
-    setDescription(claim.description || '');
-    setAttachment(null);
+    setGlobalDescription(claim.description || '');
+
+    let itemsList = [];
+    if (claim.items) {
+      if (typeof claim.items === 'string') {
+        try {
+          itemsList = JSON.parse(claim.items);
+        } catch (e) {
+          itemsList = [];
+        }
+      } else if (Array.isArray(claim.items)) {
+        itemsList = claim.items;
+      }
+    }
+
+    if (itemsList.length === 0) {
+      itemsList = [{
+        expenseType: claim.expenseType || 'Travel',
+        amount: claim.amount !== undefined && claim.amount !== null ? String(claim.amount) : '',
+        billNumber: claim.billNumber || '',
+        description: claim.description || '',
+        attachment: null,
+        attachmentUrl: claim.attachmentUrl,
+        travelFrom: claim.travelFrom || '',
+        travelTo: claim.travelTo || '',
+        mode: claim.mode || 'Car',
+      }];
+    } else {
+      itemsList = itemsList.map(item => ({
+        expenseType: item.expenseType || 'Travel',
+        amount: item.amount !== undefined && item.amount !== null ? String(item.amount) : '',
+        billNumber: item.billNumber || '',
+        description: item.description || '',
+        attachment: null,
+        attachmentUrl: item.attachmentUrl,
+        travelFrom: item.travelFrom || '',
+        travelTo: item.travelTo || '',
+        mode: item.mode || 'Car',
+      }));
+    }
+
+    setExpenses(itemsList);
     setView('add');
   };
 
@@ -89,10 +143,13 @@ export default function ExpenseScreen() {
       const result = await ImagePicker.launchCameraAsync({ allowsEditing: false, quality: 0.8 });
       if (!result.canceled && result.assets?.length) {
         const asset = result.assets[0];
-        setAttachment({ uri: asset.uri, name: asset.fileName || 'photo.jpg', type: asset.mimeType || 'image/jpeg' });
+        const fileObj = { uri: asset.uri, name: asset.fileName || 'photo.jpg', type: asset.mimeType || 'image/jpeg' };
+        if (activeUploadIndexRef.current !== null) {
+          updateExpenseField(activeUploadIndexRef.current, 'attachment', fileObj);
+        }
       }
     } catch (e) { Alert.alert('Error', 'Unable to open camera'); }
-  }, []);
+  }, [updateExpenseField]);
 
   const onPickImageFromLibrary = useCallback(async () => {
     try {
@@ -102,18 +159,26 @@ export default function ExpenseScreen() {
       const result = await ImagePicker.launchImageLibraryAsync({ allowsEditing: false, quality: 0.8 });
       if (!result.canceled && result.assets?.length) {
         const asset = result.assets[0];
-        setAttachment({ uri: asset.uri, name: asset.fileName || 'image.jpg', type: asset.mimeType || 'image/jpeg' });
+        const fileObj = { uri: asset.uri, name: asset.fileName || 'image.jpg', type: asset.mimeType || 'image/jpeg' };
+        if (activeUploadIndexRef.current !== null) {
+          updateExpenseField(activeUploadIndexRef.current, 'attachment', fileObj);
+        }
       }
     } catch (e) { Alert.alert('Error', 'Unable to open gallery'); }
-  }, []);
+  }, [updateExpenseField]);
 
   const onPickDocument = useCallback(async () => {
     try {
       const DocumentPicker = await import('expo-document-picker');
       const res = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false });
-      if (res.type === 'success') setAttachment({ uri: res.uri, name: res.name, type: res.mimeType || 'application/octet-stream' });
+      if (res.type === 'success') {
+        const fileObj = { uri: res.uri, name: res.name, type: res.mimeType || 'application/octet-stream' };
+        if (activeUploadIndexRef.current !== null) {
+          updateExpenseField(activeUploadIndexRef.current, 'attachment', fileObj);
+        }
+      }
     } catch (e) { Alert.alert('Error', 'Unable to open file picker'); }
-  }, []);
+  }, [updateExpenseField]);
 
   const onUploadAttachment = useCallback(() => {
     if (Platform.OS === 'web') {
@@ -135,28 +200,69 @@ export default function ExpenseScreen() {
     ]);
   }, [onPickDocument, onPickImageFromCamera, onPickImageFromLibrary]);
 
+  const triggerAttachmentUpload = (index) => {
+    activeUploadIndexRef.current = index;
+    onUploadAttachment();
+  };
+
   const onWebFileChange = (e) => {
     const f = e?.target?.files?.[0];
     if (!f) return;
     const uri = URL.createObjectURL(f);
-    setAttachment({ uri, name: f.name, type: f.type || 'application/octet-stream' });
+    const fileObj = { uri, name: f.name, type: f.type || 'application/octet-stream' };
+    if (activeUploadIndexRef.current !== null) {
+      updateExpenseField(activeUploadIndexRef.current, 'attachment', fileObj);
+    }
     try { e.target.value = null; } catch (_) {}
   };
 
   const onSubmit = async () => {
-    if (!amount) return notifyError('Enter amount');
+    // Validate all items
+    for (let i = 0; i < expenses.length; i++) {
+      const exp = expenses[i];
+      if (!exp.amount) return notifyError(`Enter amount for Item #${i + 1}`);
+      if (exp.expenseType === 'Travel') {
+        if (!exp.travelFrom) return notifyError(`Enter From Location for Item #${i + 1}`);
+        if (!exp.travelTo) return notifyError(`Enter To Location for Item #${i + 1}`);
+        if (!exp.mode) return notifyError(`Select Mode of Transport for Item #${i + 1}`);
+      }
+    }
+
     try {
       setSubmitting(true);
-      const payload = { expenseType, expenseDate, amount: Number(amount), billNumber, description, attachment };
-      const res = editingClaim?.id ? await updateExpense(editingClaim.id, payload) : await submitExpense(payload);
-      if (res?.success) {
-        notifySuccess(editingClaim?.id ? 'Expense claim updated' : 'Expense claim submitted');
-        resetForm();
-        fetchClaims();
-        setView('list');
-      } else notifyError(res?.message || (editingClaim?.id ? 'Failed to update expense' : 'Failed to submit expense'));
-    } catch (e) { notifyError(e?.response?.data?.message || (editingClaim?.id ? 'Failed to update expense' : 'Failed to submit expense')); }
-    finally { setSubmitting(false); }
+      if (editingClaim?.id) {
+        const payload = {
+          expenseType: expenses[0]?.expenseType || 'Other',
+          expenseDate,
+          description: globalDescription,
+          expenses
+        };
+        const res = await updateExpense(editingClaim.id, payload);
+        if (res?.success) {
+          notifySuccess('Expense claim updated');
+          resetForm();
+          fetchClaims();
+          setView('list');
+        } else notifyError(res?.message || 'Failed to update expense');
+      } else {
+        const res = await submitExpense({
+          expenseType: expenses[0]?.expenseType || 'Other',
+          expenseDate,
+          description: globalDescription,
+          expenses
+        });
+        if (res?.success) {
+          notifySuccess('Expense claim submitted');
+          resetForm();
+          fetchClaims();
+          setView('list');
+        } else notifyError(res?.message || 'Failed to submit expense');
+      }
+    } catch (e) {
+      notifyError(e?.response?.data?.message || (editingClaim?.id ? 'Failed to update expense' : 'Failed to submit expense'));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const formatDate = (dateStr) => {
@@ -292,6 +398,76 @@ export default function ExpenseScreen() {
                     </View>
                     {item.description ? (
                       <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 13, color: '#4B5563', marginTop: 10, lineHeight: 18 }}>{item.description}</Text>
+                    ) : null}
+                    {(() => {
+                      let parsedItems = [];
+                      if (item.items) {
+                        if (typeof item.items === 'string') {
+                          try {
+                            parsedItems = JSON.parse(item.items);
+                          } catch (e) {
+                            parsedItems = [];
+                          }
+                        } else if (Array.isArray(item.items)) {
+                          parsedItems = item.items;
+                        }
+                      }
+                      return parsedItems.length > 0 ? (
+                        <View style={{ backgroundColor: '#F9FAFB', borderRadius: 8, padding: 8, marginTop: 8 }}>
+                          <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 11, color: '#374151', marginBottom: 4 }}>Claimed Items ({parsedItems.length}):</Text>
+                          {parsedItems.map((sub, idx) => (
+                            <View key={idx} style={{ marginTop: idx > 0 ? 6 : 0, borderTopWidth: idx > 0 ? 0.5 : 0, borderTopColor: '#E5E7EB', paddingTop: idx > 0 ? 6 : 0 }}>
+                              <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 11, color: '#1F2937' }}>
+                                #{idx + 1}: {sub.expenseType || 'Other'} - ₹{sub.amount}
+                              </Text>
+                              {sub.expenseType === 'Travel' ? (
+                                <Text style={{ fontFamily: 'Inter_500Medium', fontSize: 11, color: '#4B5563', marginTop: 2 }}>
+                                  📍 Route: {sub.travelFrom || '-'} ➔ {sub.travelTo || '-'} {sub.mode ? `(${sub.mode})` : ''}
+                                </Text>
+                              ) : null}
+                              {sub.description ? (
+                                <Text style={{ fontFamily: 'Inter_500Medium', fontSize: 10, color: '#6B7280', marginTop: 2 }}>
+                                  Desc: {sub.description}
+                                </Text>
+                              ) : null}
+                            </View>
+                          ))}
+                        </View>
+                      ) : (item.travelFrom || item.travelTo ? (
+                        <View style={{ backgroundColor: '#F9FAFB', borderRadius: 8, padding: 8, marginTop: 8 }}>
+                          <Text style={{ fontFamily: 'Inter_500Medium', fontSize: 11, color: '#4B5563' }}>
+                            📍 Route: <Text style={{ fontFamily: 'Inter_600SemiBold' }}>{item.travelFrom || '-'}</Text> ➔ <Text style={{ fontFamily: 'Inter_600SemiBold' }}>{item.travelTo || '-'}</Text>
+                          </Text>
+                          {item.mode ? (
+                            <Text style={{ fontFamily: 'Inter_500Medium', fontSize: 11, color: '#4B5563', marginTop: 2 }}>
+                              🚗 Mode: <Text style={{ fontFamily: 'Inter_600SemiBold' }}>{item.mode}</Text>
+                            </Text>
+                          ) : null}
+                        </View>
+                      ) : null);
+                    })()}
+                    {Number(item.paidAmount || 0) > 0 || item.status === 'settled' ? (
+                      <View style={{ marginTop: 8, backgroundColor: '#FFFBEB', padding: 8, borderRadius: 8, borderWidth: 0.5, borderColor: '#FDE68A' }}>
+                        {Number(item.paidAmount || 0) > 0 ? (
+                          <Text style={{ fontFamily: 'Inter_500Medium', fontSize: 11, color: '#B45309' }}>
+                            💵 Paid Directly: <Text style={{ fontFamily: 'Inter_600SemiBold' }}>₹{item.paidAmount}</Text>
+                          </Text>
+                        ) : null}
+                        {item.status === 'settled' ? (
+                          <>
+                            <Text style={{ fontFamily: 'Inter_500Medium', fontSize: 11, color: '#16A34A', marginTop: Number(item.paidAmount || 0) > 0 ? 4 : 0 }}>
+                              ✅ Settled in Payroll: <Text style={{ fontFamily: 'Inter_600SemiBold' }}>₹{Math.max(0, (item.approvedAmount !== null && item.approvedAmount !== undefined ? Number(item.approvedAmount) : Number(item.amount)) - Number(item.paidAmount || 0))}</Text>
+                            </Text>
+                            <Text style={{ fontFamily: 'Inter_500Medium', fontSize: 11, color: '#6B7280', marginTop: 4 }}>
+                              ⏰ Remaining Balance: <Text style={{ fontFamily: 'Inter_600SemiBold' }}>₹0</Text>
+                            </Text>
+                          </>
+                        ) : (
+                          <Text style={{ fontFamily: 'Inter_500Medium', fontSize: 11, color: '#D97706', marginTop: 4 }}>
+                            ⏰ Remaining Balance: <Text style={{ fontFamily: 'Inter_600SemiBold' }}>₹{Math.max(0, (item.approvedAmount !== null && item.approvedAmount !== undefined ? Number(item.approvedAmount) : Number(item.amount)) - Number(item.paidAmount || 0))}</Text>
+                          </Text>
+                        )}
+                      </View>
                     ) : null}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6' }}>
                       <View style={{ flex: 1 }}>
@@ -454,24 +630,7 @@ export default function ExpenseScreen() {
           </Text>
 
           <View style={{ backgroundColor: '#fff', padding: 12, marginBottom: 12 }}>
-            <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginBottom: 6 }}>Expense Type</Text>
-            <TouchableOpacity onPress={() => setShowTypePicker(true)} style={{ backgroundColor: '#F3F4F6', borderRadius: 8, borderWidth: 1, borderColor: '#E6EEFF', paddingVertical: 12, paddingHorizontal: 12 }}>
-              <Text style={{ color: '#374151' }}>{expenseType || 'Select type'}</Text>
-            </TouchableOpacity>
-
-            <Modal visible={showTypePicker} transparent animationType="fade" onRequestClose={() => setShowTypePicker(false)}>
-              <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)' }} activeOpacity={1} onPress={() => setShowTypePicker(false)}>
-                <View style={{ position: 'absolute', left: 20, right: 20, top: '30%', backgroundColor: '#fff', borderRadius: 8, padding: 12 }}>
-                  {['Travel','Food','Office Supplies','Fuel','Accommodation','Communication','Other'].map((opt) => (
-                    <TouchableOpacity key={opt} onPress={() => { setExpenseType(opt); setShowTypePicker(false); }} style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }}>
-                      <Text style={{ color: opt === expenseType ? '#125EC9' : '#374151', fontFamily: opt === expenseType ? 'Inter_700Bold' : 'Inter_400Regular' }}>{opt}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </TouchableOpacity>
-            </Modal>
-
-            <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginTop: 12 }}>Expense Date</Text>
+            <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12 }}>Expense Date</Text>
             <TouchableOpacity onPress={() => {
               if (Platform.OS === 'android' && DateTimePickerAndroid && DateTimePickerAndroid.open) {
                 DateTimePickerAndroid.open({
@@ -483,30 +642,164 @@ export default function ExpenseScreen() {
               } else {
                 setShowDate(true);
               }
-            }} style={{ backgroundColor: '#F3F4F6', borderRadius: 8, padding: 12, marginTop: 6 }}>
+            }} style={{ backgroundColor: '#F3F4F6', borderRadius: 8, padding: 12, marginTop: 6, marginBottom: 12 }}>
               <Text style={{ color: '#374151' }}>{expenseDate ? (new Date(expenseDate)).toDateString() : 'Select date'}</Text>
             </TouchableOpacity>
             {showDate && (
               <DateTimePicker value={expenseDate || new Date()} mode="date" display="calendar" onChange={(_e, val) => { setShowDate(Platform.OS === 'ios'); if (val) setExpenseDate(val); }} />
             )}
 
-            <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginTop: 12 }}>Amount (₹)</Text>
-            <TextInput value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="Enter amount" style={{ backgroundColor: '#F3F4F6', borderRadius: 8, padding: 12, marginTop: 6 }} />
-
-            <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginTop: 12 }}>Bill / Invoice Number</Text>
-            <TextInput value={billNumber} onChangeText={setBillNumber} placeholder="Bill number" style={{ backgroundColor: '#F3F4F6', borderRadius: 8, padding: 12, marginTop: 6 }} />
-
-            <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginTop: 12 }}>Attachment</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
-              <TouchableOpacity onPress={onUploadAttachment} style={{ backgroundColor: '#125ec9', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}>
-                <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_600SemiBold', fontSize: 12 }}>{attachment ? 'Replace File' : 'Upload File'}</Text>
-              </TouchableOpacity>
-              {attachment ? <Text style={{ marginLeft: 12 }}>{attachment.name}</Text> : null}
-              {!attachment && editingClaim?.attachmentUrl ? <Text style={{ marginLeft: 12, color: '#6B7280' }}>Existing file saved</Text> : null}
-            </View>
-
             <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginTop: 12 }}>Description</Text>
-            <TextInput value={description} onChangeText={setDescription} placeholder="Describe the expense..." multiline style={{ backgroundColor: '#F3F4F6', borderRadius: 8, padding: 12, marginTop: 6, minHeight: 80 }} />
+            <TextInput
+              value={globalDescription}
+              onChangeText={setGlobalDescription}
+              placeholder="Describe the expense..."
+              multiline
+              style={{ backgroundColor: '#F3F4F6', borderRadius: 8, borderWidth: 1, borderColor: '#E6EEFF', padding: 10, marginTop: 6, marginBottom: 12, minHeight: 60, textAlignVertical: 'top', color: '#374151' }}
+            />
+
+            <Modal visible={showTypePicker} transparent animationType="fade" onRequestClose={() => setShowTypePicker(false)}>
+              <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' }} activeOpacity={1} onPress={() => setShowTypePicker(false)}>
+                <View style={{ width: '85%', backgroundColor: '#fff', borderRadius: 12, padding: 16, maxHeight: '60%' }}>
+                  <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#1F2937', marginBottom: 12 }}>Select Expense Type</Text>
+                  <ScrollView style={{ maxHeight: '75%' }}>
+                    {expenseTypes.map((opt) => (
+                      <TouchableOpacity
+                        key={opt}
+                        onPress={() => {
+                          if (activeTypeIndex !== null) {
+                            updateExpenseField(activeTypeIndex, 'expenseType', opt);
+                          }
+                          setShowTypePicker(false);
+                        }}
+                        style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }}
+                      >
+                        <Text style={{
+                          color: activeTypeIndex !== null && opt === expenses[activeTypeIndex]?.expenseType ? '#125EC9' : '#374151',
+                          fontFamily: activeTypeIndex !== null && opt === expenses[activeTypeIndex]?.expenseType ? 'Inter_700Bold' : 'Inter_400Regular'
+                        }}>{opt}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                  <View style={{ borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingTop: 10, marginTop: 10, flexDirection: 'row', alignItems: 'center' }}>
+                    <TextInput
+                      placeholder="New custom type..."
+                      value={newTypeName}
+                      onChangeText={setNewTypeName}
+                      style={{ flex: 1, backgroundColor: '#F3F4F6', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, marginRight: 8, color: '#374151' }}
+                    />
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (newTypeName.trim()) {
+                          const trimmed = newTypeName.trim();
+                          if (!expenseTypes.includes(trimmed)) {
+                            setExpenseTypes([...expenseTypes, trimmed]);
+                          }
+                          if (activeTypeIndex !== null) {
+                            updateExpenseField(activeTypeIndex, 'expenseType', trimmed);
+                          }
+                          setNewTypeName('');
+                          setShowTypePicker(false);
+                        }
+                      }}
+                      style={{ backgroundColor: '#125EC9', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6 }}
+                    >
+                      <Text style={{ color: '#fff', fontFamily: 'Inter_600SemiBold', fontSize: 12 }}>Add</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            </Modal>
+
+            {expenses.map((exp, index) => {
+              const isTravel = exp.expenseType === 'Travel';
+              return (
+                <View key={index} style={{ padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#FAFAFA', marginBottom: 16, marginTop: 16 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#374151' }}>Expense Item #{index + 1}</Text>
+                    {expenses.length > 1 && (
+                      <TouchableOpacity onPress={() => removeExpenseRow(index)}>
+                        <Text style={{ color: '#EF4444', fontFamily: 'Inter_600SemiBold', fontSize: 12 }}>Remove</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12, marginBottom: 6 }}>Expense Type</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setActiveTypeIndex(index);
+                      setShowTypePicker(true);
+                    }}
+                    style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', paddingVertical: 12, paddingHorizontal: 12, marginBottom: 10 }}
+                  >
+                    <Text style={{ color: '#374151' }}>{exp.expenseType || 'Select type'}</Text>
+                  </TouchableOpacity>
+
+                  <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12 }}>Amount (₹)</Text>
+                  <TextInput
+                    value={exp.amount}
+                    onChangeText={(val) => updateExpenseField(index, 'amount', val)}
+                    keyboardType="numeric"
+                    placeholder="Enter amount"
+                    style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', padding: 10, marginTop: 4, marginBottom: 10 }}
+                  />
+
+                  {isTravel && (
+                    <>
+                      <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12 }}>From Location</Text>
+                      <TextInput
+                        value={exp.travelFrom}
+                        onChangeText={(val) => updateExpenseField(index, 'travelFrom', val)}
+                        placeholder="Starting point"
+                        style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', padding: 10, marginTop: 4, marginBottom: 10 }}
+                      />
+
+                      <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12 }}>To Location</Text>
+                      <TextInput
+                        value={exp.travelTo}
+                        onChangeText={(val) => updateExpenseField(index, 'travelTo', val)}
+                        placeholder="Destination"
+                        style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', padding: 10, marginTop: 4, marginBottom: 10 }}
+                      />
+
+                      <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12 }}>Mode of Transport</Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setActiveModeIndex(index);
+                          setShowModePicker(true);
+                        }}
+                        style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', padding: 12, marginTop: 4, marginBottom: 10 }}
+                      >
+                        <Text style={{ color: '#374151' }}>{exp.mode || 'Car'}</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+
+                  <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12 }}>Bill / Invoice Number</Text>
+                  <TextInput
+                    value={exp.billNumber}
+                    onChangeText={(val) => updateExpenseField(index, 'billNumber', val)}
+                    placeholder="Bill number"
+                    style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', padding: 10, marginTop: 4, marginBottom: 10 }}
+                  />
+
+                  <Text style={{ color: '#6B7280', fontFamily: 'Inter_500Medium', fontSize: 12 }}>Attachment</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, marginBottom: 10 }}>
+                    <TouchableOpacity onPress={() => triggerAttachmentUpload(index)} style={{ backgroundColor: '#125ec9', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6 }}>
+                      <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_600SemiBold', fontSize: 11 }}>{exp.attachment ? 'Replace File' : 'Upload File'}</Text>
+                    </TouchableOpacity>
+                    {exp.attachment ? <Text style={{ marginLeft: 8, fontSize: 11, color: '#374151', flex: 1 }} numberOfLines={1}>{exp.attachment.name}</Text> : null}
+                    {!exp.attachment && exp.attachmentUrl ? <Text style={{ marginLeft: 8, fontSize: 11, color: '#6B7280' }}>Existing file saved</Text> : null}
+                  </View>
+
+
+                </View>
+              );
+            })}
+
+            <TouchableOpacity onPress={addExpenseRow} style={{ backgroundColor: '#FFFFFF', borderRadius: 8, borderWidth: 1, borderColor: '#125EC9', paddingVertical: 12, alignItems: 'center', marginBottom: 16 }}>
+              <Text style={{ color: '#125EC9', fontFamily: 'Inter_600SemiBold', fontSize: 13 }}>+ Add More Expense Line</Text>
+            </TouchableOpacity>
 
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 18 }}>
               <TouchableOpacity onPress={() => { resetForm(); setView('list'); }} style={{ flex: 1, backgroundColor: '#fff', borderRadius: 8, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB', marginRight: 8 }}>
@@ -516,6 +809,23 @@ export default function ExpenseScreen() {
                 {submitting ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontFamily: 'Inter_600SemiBold' }}>{editingClaim ? 'Update Expense' : 'Submit Expense'}</Text>}
               </TouchableOpacity>
             </View>
+
+            <Modal visible={showModePicker} transparent animationType="fade" onRequestClose={() => setShowModePicker(false)}>
+              <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)' }} activeOpacity={1} onPress={() => setShowModePicker(false)}>
+                <View style={{ position: 'absolute', left: 20, right: 20, top: '35%', backgroundColor: '#fff', borderRadius: 8, padding: 12 }}>
+                  {['Car','Bike','Train','Flight','Bus','Taxi','Auto','Other'].map((opt) => (
+                    <TouchableOpacity key={opt} onPress={() => {
+                      if (activeModeIndex !== null) {
+                        updateExpenseField(activeModeIndex, 'mode', opt);
+                      }
+                      setShowModePicker(false);
+                    }} style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }}>
+                      <Text style={{ color: '#374151', fontFamily: 'Inter_400Regular' }}>{opt}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </TouchableOpacity>
+            </Modal>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
