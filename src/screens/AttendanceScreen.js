@@ -9,21 +9,6 @@ import { formatAddress, locationTrackingService } from '../services/locationServ
 import { notifyError, notifyInfo, notifySuccess } from '../utils/notify';
 import { syncService } from '../services/syncService';
 
-const checkConnectivity = async () => {
-  try {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 2000); // 2 second timeout
-    const resp = await fetch(`${API_BASE_URL}/`, {
-      method: 'GET',
-      signal: controller.signal
-    });
-    clearTimeout(id);
-    return resp.ok || resp.status < 500;
-  } catch (err) {
-    return false;
-  }
-};
-
 export default function AttendanceScreen({ navigation }) {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -40,16 +25,51 @@ export default function AttendanceScreen({ navigation }) {
   const [showLocationDisclosure, setShowLocationDisclosure] = useState(false);
   const pendingPunchInRef = React.useRef(false);
 
+  // Immediately hydrate cached status on mount so shift and stats render with 0ms delay
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      try {
+        const local = await syncService.getLocalStatus();
+        if (local && isMounted) {
+          setStatus(local);
+        }
+        const count = await syncService.getPendingCount();
+        if (isMounted) setPendingSyncCount(count);
+      } catch (err) {
+        console.warn('Hydrate local status error:', err);
+      }
+    })();
+    return () => { isMounted = false; };
+  }, []);
+
   const loadStatus = async () => {
     try {
       setRefreshing(true);
       const pendingCount = await syncService.getPendingCount();
+      setPendingSyncCount(pendingCount);
+
+      // If status is currently null, immediately display local status
+      const local = await syncService.getLocalStatus();
+      if (local) {
+        setStatus(prev => prev || local);
+      }
+
       const res = await getAttendanceStatus();
-      if (res?.success) {
+      if (res && res.success && res.status) {
         console.log('Attendance status response:', JSON.stringify(res.status, null, 2));
         if (pendingCount === 0) {
           setStatus(res.status);
           await syncService.setServerStatus(res.status);
+        } else {
+          // If there are pending offline actions, keep local punch timestamps,
+          // but ALWAYS update assignedShift, policy, rules, etc. from server!
+          setStatus(prev => ({
+            ...res.status,
+            punchedInAt: (prev && prev.punchedInAt) || res.status.punchedInAt,
+            punchedOutAt: (prev && prev.punchedOutAt) || res.status.punchedOutAt,
+            isOnBreak: (prev && prev.isOnBreak !== undefined) ? prev.isOnBreak : res.status.isOnBreak,
+          }));
         }
         syncService.resetNetworkFailed();
       }
@@ -299,11 +319,6 @@ export default function AttendanceScreen({ navigation }) {
     let coords = null;
     setLoading(true);
     try {
-      const isOnline = await checkConnectivity();
-      if (!isOnline) {
-        console.log('[PunchIn] Offline detected via connectivity check, failing fast.');
-        throw { code: 'ERR_NETWORK', message: 'Network Error' };
-      }
       // Capture coordinates with a 6-second timeout and last known position fallback
       try {
         console.log('[PunchIn] Getting active position coordinates...');
@@ -440,11 +455,6 @@ export default function AttendanceScreen({ navigation }) {
     let coords = null;
     setLoading(true);
     try {
-      const isOnline = await checkConnectivity();
-      if (!isOnline) {
-        console.log('[PunchOut] Offline detected via connectivity check, failing fast.');
-        throw { code: 'ERR_NETWORK', message: 'Network Error' };
-      }
       // Request location permission and capture coordinates with 6-second timeout
       try {
         const Location = await import('expo-location');
@@ -550,11 +560,6 @@ export default function AttendanceScreen({ navigation }) {
   const onToggleBreak = async () => {
     setLoading(true);
     try {
-      const isOnline = await checkConnectivity();
-      if (!isOnline) {
-        console.log('[Break] Offline detected via connectivity check, failing fast.');
-        throw { code: 'ERR_NETWORK', message: 'Network Error' };
-      }
       const res = isOnBreak ? await endBreak() : await startBreak();
       if (res?.success) {
         await loadStatus();

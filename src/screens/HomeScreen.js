@@ -87,6 +87,12 @@ export default function HomeScreen({ navigation }) {
               onPress={() => handlePress('Task Management', 'TodoList', subscriptionInfo?.taskManagementEnabled)}
             />
           )}
+
+          <MenuItem
+            title="My Appraisal"
+            LeftIcon={<Image source={require('../assets/journal-text.png')} style={{ width: 18, height: 18, tintColor: '#0F3B8C' }} />}
+            onPress={() => navigation.navigate('SelfAppraisal')}
+          />
         </View>
       </View>
     </SafeAreaView>

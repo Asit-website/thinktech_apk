@@ -355,6 +355,11 @@ export default function ProfileScreen({ navigation }) {
             <Image source={require('../assets/pie.png')} style={{ width: 12, height: 12 }} />
           </TouchableOpacity>
           <View style={styles.listDivider} />
+          <TouchableOpacity style={styles.listItem} activeOpacity={0.8} onPress={() => navigation.navigate('SelfAppraisal')}>
+            <Text style={styles.listText}>My Appraisal (Self-Assessment)</Text>
+            <Image source={require('../assets/pie.png')} style={{ width: 12, height: 12 }} />
+          </TouchableOpacity>
+          <View style={styles.listDivider} />
           <TouchableOpacity style={styles.listItem} activeOpacity={0.8} onPress={() => navigation.navigate('MyDocuments')}>
             <Text style={styles.listText}>My Document</Text>
             <Image source={require('../assets/pie.png')} style={{ width: 12, height: 12 }} />

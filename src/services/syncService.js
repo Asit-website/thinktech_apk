@@ -99,7 +99,8 @@ class SyncService {
           punchedOutAt: null,
           isOnBreak: false,
           workingSeconds: 0,
-          breakSeconds: 0
+          breakSeconds: 0,
+          assignedShift: null
         };
       }
 

@@ -43,6 +43,7 @@ import MeetingScreen from './src/screens/MeetingScreen';
 import TicketScreen from './src/screens/TicketScreen';
 import AIChatScreen from './src/screens/AIChatScreen';
 import QRScannerScreen from './src/screens/QRScannerScreen';
+import SelfAppraisalScreen from './src/screens/SelfAppraisalScreen';
 import ToastHost from './src/components/ToastHost';
 import AndroidNotification from './src/components/AndroidNotification';
 import { setNotificationRef } from './src/utils/notify';
@@ -194,6 +195,7 @@ export default function App() {
               <Stack.Screen name="Ticket" component={TicketScreen} options={{ headerShown: false }} />
               <Stack.Screen name="AIChat" component={AIChatScreen} options={{ headerShown: false }} />
               <Stack.Screen name="QRScanner" component={QRScannerScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="SelfAppraisal" component={SelfAppraisalScreen} options={{ headerShown: false }} />
             </Stack.Navigator>
           </NavigationContainer>
         </PermissionsProvider>
