@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image, ScrollView, ActivityIndicator, Platform, Linking, Alert } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { listRequiredDocuments, uploadStaffDocument } from '../config/api';
 import { notifyError, notifyInfo, notifySuccess } from '../utils/notify';
 
@@ -25,17 +26,26 @@ export default function MyDocumentsScreen({ navigation }) {
     }
   };
 
-  const buildFileUrl = (p) => {
+  const buildFileUrl = (p, token) => {
     if (!p) return null;
-    if (String(p).startsWith('http')) return String(p);
+    const sep = String(p).includes('?') ? '&' : '?';
+    const tokenQuery = token ? `${sep}token=${encodeURIComponent(token)}` : '';
+    if (String(p).startsWith('http')) return `${String(p)}${tokenQuery}`;
     const base = __DEV__ ? 'http://localhost:4000' : 'https://backend.vetansutra.com';
-    return `${base}${p}`;
+    return `${base}${p}${tokenQuery}`;
   };
 
   const onView = async (p) => {
-    const url = buildFileUrl(p);
-    if (!url) return;
     try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const url = buildFileUrl(p, token);
+      if (!url) return;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.open(url, '_blank');
+        return;
+      }
+
       const supported = await Linking.canOpenURL(url);
       if (!supported) {
         notifyError('Unable to open document.');

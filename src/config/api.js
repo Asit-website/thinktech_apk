@@ -35,14 +35,30 @@ api.interceptors.request.use(
     }
     config.headers['x-device-fingerprint'] = deviceFingerprint;
 
-    // Handle FormData requests - set multipart/form-data explicitly
-    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
-      console.log('FormData detected, setting multipart/form-data');
-      // Set explicit multipart/form-data Content-Type
-      config.headers['Content-Type'] = 'multipart/form-data';
+    // Handle FormData requests - do NOT set Content-Type explicitly in React Native,
+    // otherwise the boundary parameter is omitted and OkHttp crashes with ERR_NETWORK
+    const isFormData = Boolean(
+      config.data && (
+        (typeof FormData !== 'undefined' && config.data instanceof FormData) ||
+        config.data?._parts ||
+        config.data?.constructor?.name === 'FormData' ||
+        (typeof config.data?.append === 'function' && Array.isArray(config.data?._parts))
+      )
+    );
+
+    if (isFormData) {
+      console.log('FormData detected, deleting manual Content-Type so native layer injects boundary');
+      if (config.headers) {
+        if (typeof config.headers.delete === 'function') {
+          config.headers.delete('Content-Type');
+          config.headers.delete('content-type');
+        } else {
+          delete config.headers['Content-Type'];
+          delete config.headers['content-type'];
+        }
+      }
       // Don't transform FormData
       config.transformRequest = [(data) => data];
-      // Set Accept header
       config.headers['Accept'] = 'application/json';
     } else {
       // Set Content-Type for JSON requests
@@ -54,8 +70,8 @@ api.interceptors.request.use(
       url: config.url,
       method: config.method,
       baseURL: config.baseURL,
-      contentType: config.headers['Content-Type'],
-      isFormData: config.data instanceof FormData
+      contentType: config.headers?.['Content-Type'] || config.headers?.['content-type'] || 'auto-multipart',
+      isFormData
     });
 
     return config;
@@ -292,32 +308,43 @@ export async function getMaxBreakDuration() {
 export async function punchInWithPhoto(photoUri, coords) {
   console.log('punchInWithPhoto called with URI:', photoUri);
 
+  // If NO photo is provided, send clean JSON directly to avoid React Native Axios FormData boundary errors
+  if (!photoUri) {
+    const payload = {
+      platform: Platform.OS,
+    };
+    if (coords && typeof coords.lat === 'number' && typeof coords.lng === 'number') {
+      payload.lat = coords.lat;
+      payload.lng = coords.lng;
+      if (typeof coords.accuracy === 'number') {
+        payload.accuracyMeters = Math.round(coords.accuracy);
+      }
+      if (coords.address) {
+        payload.address = String(coords.address);
+      }
+    }
+    console.log('Dispatching clean JSON punch-in request...');
+    const resp = await api.post('/attendance/punch-in', payload);
+    return resp.data;
+  }
+
+  // When photo IS provided, prepare FormData
   const form = new FormData();
   form.append('platform', Platform.OS);
 
-  if (photoUri) {
-    if (Platform.OS === 'web') {
-      console.log('Processing photo for web...');
-      const r = await fetch(photoUri);
-      const blob = await r.blob();
-      const file = new File([blob], 'punch-in.jpg', { type: blob.type || 'image/jpeg' });
-      form.append('photo', file);
-      console.log('Web photo processed, blob size:', blob.size);
-    } else {
-      console.log('Processing photo for mobile...');
-      // Fix for mobile camera picker
-      const fileName = photoUri.split('/').pop() || 'punch-in.jpg';
-      form.append('photo', {
-        uri: photoUri,
-        name: fileName,
-        type: 'image/jpeg',
-      });
-      console.log('Mobile photo processed, filename:', fileName);
-    }
+  if (Platform.OS === 'web') {
+    const r = await fetch(photoUri);
+    const blob = await r.blob();
+    const file = new File([blob], 'punch-in.jpg', { type: blob.type || 'image/jpeg' });
+    form.append('photo', file);
   } else {
-    console.log('No photo URI provided, skipping photo attachment');
+    const fileName = photoUri.split('/').pop() || 'punch-in.jpg';
+    form.append('photo', {
+      uri: photoUri,
+      name: fileName,
+      type: 'image/jpeg',
+    });
   }
-
 
   if (coords && typeof coords.lat === 'number' && typeof coords.lng === 'number') {
     form.append('lat', String(coords.lat));
@@ -328,70 +355,73 @@ export async function punchInWithPhoto(photoUri, coords) {
     if (coords.address) {
       form.append('address', String(coords.address));
     }
-    console.log('Location data added to form');
   }
 
-  try {
-    console.log('Making punch-in API request...');
-    const resp = await api.post('/attendance/punch-in', form);
-    console.log('Punch-in API response:', resp.data);
-    return resp.data;
-  } catch (error) {
-    // Try with explicit multipart content type as fallback (this is crucial!)
-    if (error.code === 'NETWORK_ERROR' || error.code === 'ERR_NETWORK' || error.message?.includes('Network Error') || error.message?.includes('Network request failed')) {
-      try {
-        const token = await AsyncStorage.getItem('auth_token');
-        const directApi = axios.create({
-          baseURL: API_BASE_URL,
-          headers: {
-            'Content-Type': 'multipart/form-data',
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          timeout: 30000,
-        });
+  // Use native fetch directly for multipart to prevent Axios React Native boundary issues
+  const token = await AsyncStorage.getItem('auth_token');
+  const deviceFingerprint = await AsyncStorage.getItem('device_fingerprint');
+  const fetchHeaders = {
+    'Accept': 'application/json',
+    'X-App-Platform': 'mobile-apk',
+  };
+  if (token) fetchHeaders['Authorization'] = `Bearer ${token}`;
+  if (deviceFingerprint) fetchHeaders['x-device-fingerprint'] = deviceFingerprint;
 
-        const resp = await directApi.post('/attendance/punch-in', form);
-        console.log('Direct API response:', resp.data);
-        return resp.data;
-      } catch (fallbackError) {
-        throw fallbackError;
-      }
-    }
+  const fetchResp = await fetch(`${API_BASE_URL}/attendance/punch-in`, {
+    method: 'POST',
+    headers: fetchHeaders,
+    body: form,
+  });
 
-    throw error;
+  const data = await fetchResp.json();
+  if (!fetchResp.ok) {
+    const fallbackErr = new Error(data?.message || `HTTP ${fetchResp.status}`);
+    fallbackErr.response = { status: fetchResp.status, data };
+    throw fallbackErr;
   }
+  return data;
 }
 
 export async function punchOutWithPhoto(photoUri, coords) {
   console.log('punchOutWithPhoto called with URI:', photoUri);
 
+  // If NO photo is provided, send clean JSON directly
+  if (!photoUri) {
+    const payload = {
+      platform: Platform.OS,
+    };
+    if (coords && typeof coords.lat === 'number' && typeof coords.lng === 'number') {
+      payload.lat = coords.lat;
+      payload.lng = coords.lng;
+      if (typeof coords.accuracy === 'number') {
+        payload.accuracyMeters = Math.round(coords.accuracy);
+      }
+      if (coords.address) {
+        payload.address = String(coords.address);
+      }
+    }
+    console.log('Dispatching clean JSON punch-out request...');
+    const resp = await api.post('/attendance/punch-out', payload);
+    return resp.data;
+  }
+
+  // When photo IS provided, prepare FormData
   const form = new FormData();
   form.append('platform', Platform.OS);
 
-  if (photoUri) {
-    if (Platform.OS === 'web') {
-      console.log('Processing photo for web...');
-      const r = await fetch(photoUri);
-      const blob = await r.blob();
-      const file = new File([blob], 'punch-out.jpg', { type: blob.type || 'image/jpeg' });
-      form.append('photo', file);
-      console.log('Web photo processed, blob size:', blob.size);
-    } else {
-      console.log('Processing photo for mobile...');
-      // Fix for mobile camera picker
-      const fileName = photoUri.split('/').pop() || 'punch-out.jpg';
-      form.append('photo', {
-        uri: photoUri,
-        name: fileName,
-        type: 'image/jpeg',
-      });
-      console.log('Mobile photo processed, filename:', fileName);
-    }
+  if (Platform.OS === 'web') {
+    const r = await fetch(photoUri);
+    const blob = await r.blob();
+    const file = new File([blob], 'punch-out.jpg', { type: blob.type || 'image/jpeg' });
+    form.append('photo', file);
   } else {
-    console.log('No photo URI provided, skipping photo attachment');
+    const fileName = photoUri.split('/').pop() || 'punch-out.jpg';
+    form.append('photo', {
+      uri: photoUri,
+      name: fileName,
+      type: 'image/jpeg',
+    });
   }
-
 
   if (coords && typeof coords.lat === 'number' && typeof coords.lng === 'number') {
     form.append('lat', String(coords.lat));
@@ -402,49 +432,30 @@ export async function punchOutWithPhoto(photoUri, coords) {
     if (coords.address) {
       form.append('address', String(coords.address));
     }
-    console.log('Location data added to form');
   }
 
-  try {
-    console.log('Making punch-out API request...');
-    const resp = await api.post('/attendance/punch-out', form);
-    console.log('Punch-out API response:', resp.data);
-    return resp.data;
-  } catch (error) {
-    // Try with explicit multipart content type as fallback (this is crucial!)
-    if (error.code === 'NETWORK_ERROR' || error.code === 'ERR_NETWORK' || error.message?.includes('Network Error') || error.message?.includes('Network request failed')) {
-      try {
-        const token = await AsyncStorage.getItem('auth_token');
-        const directApi = axios.create({
-          baseURL: API_BASE_URL,
-          headers: {
-            'Content-Type': 'multipart/form-data',
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          timeout: 30000,
-        });
+  const token = await AsyncStorage.getItem('auth_token');
+  const deviceFingerprint = await AsyncStorage.getItem('device_fingerprint');
+  const fetchHeaders = {
+    'Accept': 'application/json',
+    'X-App-Platform': 'mobile-apk',
+  };
+  if (token) fetchHeaders['Authorization'] = `Bearer ${token}`;
+  if (deviceFingerprint) fetchHeaders['x-device-fingerprint'] = deviceFingerprint;
 
-        const resp = await directApi.post('/attendance/punch-out', form);
-        console.log('Direct punch-out API response:', resp.data);
-        return resp.data;
-      } catch (fallbackError) {
-        throw fallbackError;
-      }
-    }
-
-    throw error;
-  }
-}
-
-export async function pingLocation({ lat, lng, accuracy }) {
-  if (typeof lat !== 'number' || typeof lng !== 'number') return { success: false };
-  const resp = await api.post('/attendance/location/ping', {
-    lat,
-    lng,
-    accuracyMeters: typeof accuracy === 'number' ? Math.round(accuracy) : undefined,
+  const fetchResp = await fetch(`${API_BASE_URL}/attendance/punch-out`, {
+    method: 'POST',
+    headers: fetchHeaders,
+    body: form,
   });
-  return resp.data;
+
+  const data = await fetchResp.json();
+  if (!fetchResp.ok) {
+    const fallbackErr = new Error(data?.message || `HTTP ${fetchResp.status}`);
+    fallbackErr.response = { status: fetchResp.status, data };
+    throw fallbackErr;
+  }
+  return data;
 }
 
 export async function startBreak() {
@@ -764,28 +775,36 @@ export async function submitVisitForm({
     console.error('Error response:', error.response);
     console.error('Error config:', error.config);
 
-    // Try with explicit multipart content type as fallback (same as punch-in)
+    // Direct fetch fallback for FormData
     if (error.code === 'NETWORK_ERROR' || error.code === 'ERR_NETWORK' || error.message?.includes('Network Error') || error.message?.includes('Network request failed')) {
-      console.log('Trying visit form with explicit multipart content type...');
+      console.log('Trying visit form with direct fetch fallback...');
       try {
         const token = await AsyncStorage.getItem('auth_token');
-        const directApi = axios.create({
-          baseURL: API_BASE_URL,
-          headers: {
-            'Content-Type': 'multipart/form-data',
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          timeout: 30000,
+        const deviceFingerprint = await AsyncStorage.getItem('device_fingerprint');
+        const fetchHeaders = {
+          'Accept': 'application/json',
+          'X-App-Platform': 'mobile-apk',
+        };
+        if (token) fetchHeaders['Authorization'] = `Bearer ${token}`;
+        if (deviceFingerprint) fetchHeaders['x-device-fingerprint'] = deviceFingerprint;
+
+        const fetchResp = await fetch(`${API_BASE_URL}/sales/visit`, {
+          method: 'POST',
+          headers: fetchHeaders,
+          body: form,
         });
 
-        const resp = await directApi.post('/sales/visit', form);
-        console.log('Direct visit form API response:', resp.data);
-        return resp.data;
+        const data = await fetchResp.json();
+        console.log('Direct fetch visit form response:', data);
+        if (!fetchResp.ok) {
+          const fallbackErr = new Error(data?.message || `HTTP ${fetchResp.status}`);
+          fallbackErr.response = { status: fetchResp.status, data };
+          throw fallbackErr;
+        }
+        return data;
       } catch (fallbackError) {
-        console.error('Direct visit form API also failed:', fallbackError);
-        console.error('Fallback error response:', fallbackError.response);
-        throw fallbackError;
+        console.error('Direct visit fetch fallback error:', fallbackError);
+        throw (fallbackError.response ? fallbackError : error);
       }
     }
 
@@ -912,28 +931,36 @@ export async function submitOrder({
     console.error('Error response:', error.response);
     console.error('Error config:', error.config);
 
-    // Try with explicit multipart content type as fallback (this is crucial!)
+    // Direct fetch fallback for FormData
     if (error.code === 'NETWORK_ERROR' || error.code === 'ERR_NETWORK' || error.message?.includes('Network Error') || error.message?.includes('Network request failed') || error.response?.status === 415) {
-      console.log('Trying order with explicit multipart content type...');
+      console.log('Trying order with direct fetch fallback...');
       try {
         const token = await AsyncStorage.getItem('auth_token');
-        const directApi = axios.create({
-          baseURL: API_BASE_URL,
-          headers: {
-            'Content-Type': 'multipart/form-data',
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          timeout: 30000,
+        const deviceFingerprint = await AsyncStorage.getItem('device_fingerprint');
+        const fetchHeaders = {
+          'Accept': 'application/json',
+          'X-App-Platform': 'mobile-apk',
+        };
+        if (token) fetchHeaders['Authorization'] = `Bearer ${token}`;
+        if (deviceFingerprint) fetchHeaders['x-device-fingerprint'] = deviceFingerprint;
+
+        const fetchResp = await fetch(`${API_BASE_URL}/sales/orders`, {
+          method: 'POST',
+          headers: fetchHeaders,
+          body: form,
         });
 
-        const resp = await directApi.post('/sales/orders', form);
-        console.log('Direct order API response:', resp.data);
-        return resp.data;
+        const data = await fetchResp.json();
+        console.log('Direct fetch order response:', data);
+        if (!fetchResp.ok) {
+          const fallbackErr = new Error(data?.message || `HTTP ${fetchResp.status}`);
+          fallbackErr.response = { status: fetchResp.status, data };
+          throw fallbackErr;
+        }
+        return data;
       } catch (fallbackError) {
-        console.error('Direct order API also failed:', fallbackError);
-        console.error('Fallback error response:', fallbackError.response);
-        throw fallbackError;
+        console.error('Direct order fetch fallback error:', fallbackError);
+        throw (fallbackError.response ? fallbackError : error);
       }
     }
 

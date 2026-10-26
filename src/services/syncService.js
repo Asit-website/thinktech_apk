@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
+import { Platform } from 'react-native';
 import { punchInWithPhoto, punchOutWithPhoto, startBreak, endBreak, getAttendanceStatus } from '../config/api';
 
 const SYNC_QUEUE_KEY = 'offline_sync_queue';
@@ -12,10 +13,25 @@ class SyncService {
   }
 
   resetNetworkFailed() {
-    if (this.networkFailed) {
+    this.networkFailed = false;
+    console.log('Network status restored, resetting offline sync flag.');
+    this.sync();
+  }
+
+  async clearQueue() {
+    try {
+      const queueJson = await AsyncStorage.getItem(SYNC_QUEUE_KEY);
+      const queue = queueJson ? JSON.parse(queueJson) : [];
+      for (const item of queue) {
+        if (item.data?.photoUri && item.data.photoUri.startsWith('file://')) {
+          try { await FileSystem.deleteAsync(item.data.photoUri, { idempotent: true }); } catch (_) {}
+        }
+      }
+      await AsyncStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify([]));
       this.networkFailed = false;
-      console.log('Network status restored, resetting offline sync flag.');
-      this.sync();
+      return true;
+    } catch (e) {
+      return false;
     }
   }
 
@@ -181,16 +197,58 @@ class SyncService {
       }
 
       if (queue.length > 0) {
+        // Discard stale offline items older than 24 hours
+        const nowMs = Date.now();
+        queue = queue.filter(item => {
+          const itemTime = item.createdAt ? new Date(item.createdAt).getTime() : 0;
+          const isStale = (nowMs - itemTime) > 24 * 60 * 60 * 1000;
+          if (isStale) {
+            console.warn(`[SyncService] Discarding stale offline item ${item.id} (older than 24h)`);
+            if (item.data?.photoUri && item.data.photoUri.startsWith('file://')) {
+              try { FileSystem.deleteAsync(item.data.photoUri, { idempotent: true }); } catch (_) {}
+            }
+            return false;
+          }
+          return true;
+        });
+
         console.log(`Starting sync for ${queue.length} items...`);
         const remainingQueue = [];
         
-        for (const item of queue) {
+        for (let i = 0; i < queue.length; i++) {
+          const item = queue[i];
           let success = false;
           try {
             switch (item.type) {
-              case 'PUNCH_IN':
-                const resIn = await punchInWithPhoto(item.data.photoUri, item.data.coords);
+              case 'PUNCH_IN': {
+                // If user is already punched in on the server, resolve item immediately
+                try {
+                  const currentStatus = await getAttendanceStatus();
+                  if (currentStatus?.success && currentStatus?.status?.punchedInAt) {
+                    console.log(`[SyncService] Punch-in already present on server (${currentStatus.status.punchedInAt}), resolving ${item.id}`);
+                    success = true;
+                    break;
+                  }
+                } catch (_) {}
+
+                let photoUri = item.data?.photoUri;
+                if (photoUri && Platform.OS !== 'web' && photoUri.startsWith('file://')) {
+                  try {
+                    const info = await FileSystem.getInfoAsync(photoUri);
+                    if (!info.exists) {
+                      console.warn('Sync photo not found at:', photoUri, 'proceeding without photo');
+                      photoUri = null;
+                    }
+                  } catch (photoErr) {
+                    console.warn('Photo check failed:', photoErr);
+                  }
+                }
+                const resIn = await punchInWithPhoto(photoUri, item.data?.coords);
                 success = resIn?.success;
+                if (!success && resIn?.message && String(resIn.message).toLowerCase().includes('already')) {
+                  console.log(`[SyncService] Punch-in reported already present: ${resIn.message}`);
+                  success = true;
+                }
                 if (success) {
                   try {
                     const { locationTrackingService } = require('./locationService');
@@ -201,9 +259,36 @@ class SyncService {
                   }
                 }
                 break;
-              case 'PUNCH_OUT':
-                const resOut = await punchOutWithPhoto(item.data.photoUri, item.data.coords);
+              }
+              case 'PUNCH_OUT': {
+                // If user is already punched out on the server, resolve item immediately
+                try {
+                  const currentStatus = await getAttendanceStatus();
+                  if (currentStatus?.success && currentStatus?.status?.punchedOutAt) {
+                    console.log(`[SyncService] Punch-out already present on server (${currentStatus.status.punchedOutAt}), resolving ${item.id}`);
+                    success = true;
+                    break;
+                  }
+                } catch (_) {}
+
+                let photoUri = item.data?.photoUri;
+                if (photoUri && Platform.OS !== 'web' && photoUri.startsWith('file://')) {
+                  try {
+                    const info = await FileSystem.getInfoAsync(photoUri);
+                    if (!info.exists) {
+                      console.warn('Sync photo not found at:', photoUri, 'proceeding without photo');
+                      photoUri = null;
+                    }
+                  } catch (photoErr) {
+                    console.warn('Photo check failed:', photoErr);
+                  }
+                }
+                const resOut = await punchOutWithPhoto(photoUri, item.data?.coords);
                 success = resOut?.success;
+                if (!success && resOut?.message && String(resOut.message).toLowerCase().includes('already')) {
+                  console.log(`[SyncService] Punch-out reported already present: ${resOut.message}`);
+                  success = true;
+                }
                 if (success) {
                   try {
                     const { locationTrackingService } = require('./locationService');
@@ -214,14 +299,17 @@ class SyncService {
                   }
                 }
                 break;
-              case 'START_BREAK':
+              }
+              case 'START_BREAK': {
                 const resSB = await startBreak();
                 success = resSB?.success;
                 break;
-              case 'END_BREAK':
+              }
+              case 'END_BREAK': {
                 const resEB = await endBreak();
                 success = resEB?.success;
                 break;
+              }
             }
 
             if (success) {
@@ -232,33 +320,60 @@ class SyncService {
                 } catch (e) {}
               }
             } else {
-              remainingQueue.push(item);
+              item.retryCount = (item.retryCount || 0) + 1;
+              if (item.retryCount >= 2) {
+                console.warn(`Dropping stuck offline item ${item.id} after ${item.retryCount} failed attempts`);
+                if (item.data && item.data.photoUri && item.data.photoUri.startsWith('file://')) {
+                  try {
+                    await FileSystem.deleteAsync(item.data.photoUri, { idempotent: true });
+                  } catch (e) {}
+                }
+              } else {
+                remainingQueue.push(item);
+              }
             }
           } catch (error) {
             console.error(`Sync failed for item ${item.id}:`, error.message);
-            
-            const isTemporaryError = !error.response || 
+
+            const errMsg = String(error.message || '').toLowerCase();
+            const resMsg = String(error.response?.data?.message || '').toLowerCase();
+            const isConflict = error.response?.status === 409 || 
+              errMsg.includes('already punched') || 
+              resMsg.includes('already punched');
+
+            if (isConflict) {
+              console.log(`[SyncService] Punch already exists on server for ${item.id}, marking resolved.`);
+              if (item.data?.photoUri && item.data.photoUri.startsWith('file://')) {
+                try { await FileSystem.deleteAsync(item.data.photoUri, { idempotent: true }); } catch (_) {}
+              }
+              continue;
+            }
+
+            // Only mark true network loss if NO response was received from the server at all
+            const isActualNetworkLoss = !error.response && (
               error.code === 'ERR_NETWORK' || 
               error.code === 'NETWORK_ERROR' || 
               error.code === 'ECONNABORTED' || 
-              error.message?.includes('Network') || 
-              error.message?.includes('timeout') ||
-              error.response?.status === 408 ||
-              error.response?.status === 429 ||
-              (error.response?.status >= 500 && error.response?.status <= 599);
+              errMsg.includes('network') || 
+              errMsg.includes('timeout')
+            );
 
-            if (isTemporaryError) {
-              remainingQueue.push(item);
-              this.networkFailed = true;
-              break; // Stop syncing remaining items since network/server is down
-            } else {
-              console.warn(`Discarding item ${item.id} due to permanent API error:`, error.response?.status);
-              // Clean up local photo since we are discarding the item
-              if (item.data && item.data.photoUri && item.data.photoUri.startsWith('file://')) {
-                try {
-                  await FileSystem.deleteAsync(item.data.photoUri, { idempotent: true });
-                } catch (e) {}
+            item.retryCount = (item.retryCount || 0) + 1;
+            if (item.retryCount >= 2 || (error.response && error.response.status >= 400 && error.response.status < 500)) {
+              console.warn(`[SyncService] Discarding stuck item ${item.id} (attempts: ${item.retryCount}, status: ${error.response?.status}):`, error.message);
+              if (item.data?.photoUri && item.data.photoUri.startsWith('file://')) {
+                try { await FileSystem.deleteAsync(item.data.photoUri, { idempotent: true }); } catch (_) {}
               }
+            } else {
+              remainingQueue.push(item);
+            }
+
+            if (isActualNetworkLoss) {
+              this.networkFailed = true;
+              for (let j = i + 1; j < queue.length; j++) {
+                remainingQueue.push(queue[j]);
+              }
+              break;
             }
           }
         }

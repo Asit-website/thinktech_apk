@@ -22,6 +22,7 @@ export default function AttendanceScreen({ navigation }) {
   const [hasLeavePolicy, setHasLeavePolicy] = useState(false);
   const [user, setUser] = useState(null);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const [cachedShift, setCachedShift] = useState(null);
   const [showLocationDisclosure, setShowLocationDisclosure] = useState(false);
   const pendingPunchInRef = React.useRef(false);
 
@@ -30,11 +31,17 @@ export default function AttendanceScreen({ navigation }) {
     let isMounted = true;
     (async () => {
       try {
-        const local = await syncService.getLocalStatus();
+        const [local, shiftRaw, count] = await Promise.all([
+          syncService.getLocalStatus(),
+          AsyncStorage.getItem('cached_assigned_shift'),
+          syncService.getPendingCount()
+        ]);
+        if (shiftRaw && isMounted) {
+          try { const p = JSON.parse(shiftRaw); if (p) setCachedShift(p); } catch (_) {}
+        }
         if (local && isMounted) {
           setStatus(local);
         }
-        const count = await syncService.getPendingCount();
         if (isMounted) setPendingSyncCount(count);
       } catch (err) {
         console.warn('Hydrate local status error:', err);
@@ -58,17 +65,22 @@ export default function AttendanceScreen({ navigation }) {
       const res = await getAttendanceStatus();
       if (res && res.success && res.status) {
         console.log('Attendance status response:', JSON.stringify(res.status, null, 2));
+        if (res.status.assignedShift) {
+          setCachedShift(res.status.assignedShift);
+          AsyncStorage.setItem('cached_assigned_shift', JSON.stringify(res.status.assignedShift)).catch(() => {});
+        } else {
+          setCachedShift(null);
+          AsyncStorage.removeItem('cached_assigned_shift').catch(() => {});
+        }
+        await syncService.setServerStatus(res.status);
         if (pendingCount === 0) {
           setStatus(res.status);
-          await syncService.setServerStatus(res.status);
         } else {
-          // If there are pending offline actions, keep local punch timestamps,
-          // but ALWAYS update assignedShift, policy, rules, etc. from server!
           setStatus(prev => ({
             ...res.status,
-            punchedInAt: (prev && prev.punchedInAt) || res.status.punchedInAt,
-            punchedOutAt: (prev && prev.punchedOutAt) || res.status.punchedOutAt,
-            isOnBreak: (prev && prev.isOnBreak !== undefined) ? prev.isOnBreak : res.status.isOnBreak,
+            punchedInAt: res.status.punchedInAt || (prev && prev.punchedInAt),
+            punchedOutAt: res.status.punchedOutAt || (prev && prev.punchedOutAt),
+            isOnBreak: (res.status.isOnBreak !== undefined) ? res.status.isOnBreak : prev?.isOnBreak,
           }));
         }
         syncService.resetNetworkFailed();
@@ -193,20 +205,25 @@ export default function AttendanceScreen({ navigation }) {
   const breakSeconds = Number(status?.breakSeconds || 0);
   const overtimeSeconds = Number(status?.overtimeSeconds || 0);
   const dayStatus = status?.dayStatus || 'ABSENT';
-  const assignedShift = status?.assignedShift || null;
+  const assignedShift = status?.assignedShift || cachedShift || null;
   const isRestricted = !!status?.mobilePunchRestricted;
 
   const shiftLabel = useMemo(() => {
-    if (!assignedShift) return 'Not assigned';
-    const t = (assignedShift.shiftType || '').toLowerCase();
-    if (t === 'open') {
-      const mins = Number(assignedShift.workMinutes || 0);
-      return `${assignedShift.name || 'Open Shift'} • ${mins} mins`;
+    if (assignedShift) {
+      const t = (assignedShift.shiftType || '').toLowerCase();
+      if (t === 'open') {
+        const mins = Number(assignedShift.workMinutes || 0);
+        return `${assignedShift.name || 'Open Shift'} • ${mins} mins`;
+      }
+      const start = assignedShift.startTime || '--:--';
+      const end = assignedShift.endTime || '--:--';
+      return `${assignedShift.name || 'Shift'} • ${start} - ${end}`;
     }
-    const start = assignedShift.startTime || '--:--';
-    const end = assignedShift.endTime || '--:--';
-    return `${assignedShift.name || 'Shift'} • ${start} - ${end}`;
-  }, [status?.assignedShift]);
+    if (refreshing || (!status && !cachedShift)) {
+      return 'Loading shift...';
+    }
+    return 'General Shift (Active)';
+  }, [assignedShift, status, refreshing, cachedShift]);
 
   const hh = Math.floor(workingSeconds / 3600);
   const mm = Math.floor((workingSeconds % 3600) / 60);
@@ -379,14 +396,15 @@ export default function AttendanceScreen({ navigation }) {
       }
     } catch (e) {
       console.log('[PunchIn] Caught error in punch-in:', JSON.stringify(e));
-      const isOfflineError = !e.response || 
+      const errMsg = String(e?.message || '');
+      const isOfflineError = !e.response && (
         e.code === 'ERR_NETWORK' || 
         e.code === 'NETWORK_ERROR' || 
         e.code === 'ECONNABORTED' || 
-        e.message?.includes('Network') || 
-        e.message?.includes('timeout') ||
-        (e.response?.status >= 500 && e.response?.status <= 599) ||
-        e.response?.status === 408;
+        errMsg.includes('Network Error') || 
+        errMsg.includes('Network request failed') ||
+        errMsg.includes('timeout')
+      );
 
       console.log('[PunchIn] isOfflineError check resolved to:', isOfflineError);
 
@@ -512,14 +530,15 @@ export default function AttendanceScreen({ navigation }) {
       }
     } catch (e) {
       console.log('[PunchOut] Caught error in punch-out:', JSON.stringify(e));
-      const isOfflineError = !e.response || 
+      const errMsg = String(e?.message || '');
+      const isOfflineError = !e.response && (
         e.code === 'ERR_NETWORK' || 
         e.code === 'NETWORK_ERROR' || 
         e.code === 'ECONNABORTED' || 
-        e.message?.includes('Network') || 
-        e.message?.includes('timeout') ||
-        (e.response?.status >= 500 && e.response?.status <= 599) ||
-        e.response?.status === 408;
+        errMsg.includes('Network Error') || 
+        errMsg.includes('Network request failed') ||
+        errMsg.includes('timeout')
+      );
 
       console.log('[PunchOut] isOfflineError check resolved to:', isOfflineError);
 
@@ -568,14 +587,15 @@ export default function AttendanceScreen({ navigation }) {
         notifyError(res?.message || 'Unable to update break status. Please try again.');
       }
     } catch (e) {
-      const isOfflineError = !e.response || 
+      const errMsg = String(e?.message || '');
+      const isOfflineError = !e.response && (
         e.code === 'ERR_NETWORK' || 
         e.code === 'NETWORK_ERROR' || 
         e.code === 'ECONNABORTED' || 
-        e.message?.includes('Network') || 
-        e.message?.includes('timeout') ||
-        (e.response?.status >= 500 && e.response?.status <= 599) ||
-        e.response?.status === 408;
+        errMsg.includes('Network Error') || 
+        errMsg.includes('Network request failed') ||
+        errMsg.includes('timeout')
+      );
 
       if (isOfflineError) {
         const type = isOnBreak ? 'END_BREAK' : 'START_BREAK';
@@ -670,8 +690,33 @@ export default function AttendanceScreen({ navigation }) {
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
         {pendingSyncCount > 0 && (
           <View style={styles.syncBanner}>
-            <ActivityIndicator size="small" color="#fff" />
-            <Text style={styles.syncText}>Syncing {pendingSyncCount} offline actions...</Text>
+            <TouchableOpacity 
+              style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 }}
+              activeOpacity={0.8}
+              onPress={async () => {
+                try {
+                  syncService.resetNetworkFailed();
+                  await syncService.sync();
+                  const count = await syncService.getPendingCount();
+                  setPendingSyncCount(count);
+                  await loadStatus();
+                } catch (_) {}
+              }}
+            >
+              <ActivityIndicator size="small" color="#fff" />
+              <Text style={styles.syncText}>Syncing {pendingSyncCount} offline actions... (Tap to retry)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={async () => {
+                await syncService.clearQueue();
+                setPendingSyncCount(0);
+                await loadStatus();
+              }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+            >
+              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 14 }}>✕</Text>
+            </TouchableOpacity>
           </View>
         )}
         {isRestricted && (

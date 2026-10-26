@@ -358,12 +358,18 @@ export default function SalaryReportScreen({ navigation }) {
     try {
       if (salaryData && salaryData.isGenerated && salaryData.payslipPath) {
         // Construct full URL to the static file
-        const baseURL = api.defaults.baseURL || 'http://192.168.1.5:3000';
+        const baseURL = api.defaults.baseURL || 'http://localhost:4000';
         // Ensure payslipPath starts with /
         const path = salaryData.payslipPath.startsWith('/') ? salaryData.payslipPath : '/' + salaryData.payslipPath;
-        const url = `${baseURL}${path}`;
+        const token = await AsyncStorage.getItem('auth_token');
+        const sep = path.includes('?') ? '&' : '?';
+        const url = `${baseURL}${path}${token ? `${sep}token=${encodeURIComponent(token)}` : ''}`;
         console.log('Opening payslip:', url);
-        await Linking.openURL(url);
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          window.open(url, '_blank');
+        } else {
+          await Linking.openURL(url);
+        }
       } else {
         Alert.alert('Error', 'Payslip path not found');
       }

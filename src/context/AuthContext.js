@@ -127,6 +127,8 @@ export const AuthProvider = ({ children }) => {
       await AsyncStorage.removeItem('auth_token');
       await AsyncStorage.removeItem('refresh_token');
       await AsyncStorage.removeItem('user');
+      await AsyncStorage.removeItem('cached_assigned_shift');
+      await AsyncStorage.removeItem('offline_attendance_status');
       setUser(null);
     }
   };
