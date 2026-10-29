@@ -1,7 +1,6 @@
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 import { showToast } from './toastBus';
 import React from 'react';
-import { createRoot } from 'react-dom/client';
 
 // Global notification state
 let notificationRef = null;
@@ -17,9 +16,12 @@ export function notifySuccess(message, title = 'Success') {
   }
   
   const ok = showToast({ type: 'success', title, message });
-  if (!ok && Platform.OS !== 'android') {
-    // Fallback for web only
-    console.log(`✅ ${title}: ${message}`);
+  if (!ok) {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
+      window.alert(title ? title + ': ' + message : message);
+    } else {
+      Alert.alert(title, message);
+    }
   }
 }
 
@@ -30,9 +32,12 @@ export function notifyError(message, title = 'Error') {
   }
   
   const ok = showToast({ type: 'error', title, message });
-  if (!ok && Platform.OS !== 'android') {
-    // Fallback for web only
-    console.log(`❌ ${title}: ${message}`);
+  if (!ok) {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
+      window.alert(title ? title + ': ' + message : message);
+    } else {
+      Alert.alert(title, message);
+    }
   }
 }
 
@@ -43,8 +48,11 @@ export function notifyInfo(message, title = 'Info') {
   }
   
   const ok = showToast({ type: 'info', title, message });
-  if (!ok && Platform.OS !== 'android') {
-    // Fallback for web only
-    console.log(`ℹ️ ${title}: ${message}`);
+  if (!ok) {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
+      window.alert(title ? title + ': ' + message : message);
+    } else {
+      Alert.alert(title, message);
+    }
   }
 }

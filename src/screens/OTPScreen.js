@@ -159,12 +159,17 @@ export default function OTPScreen({ route, navigation }) {
     try {
       const res = await sendOtp(phone);
       if (res?.otp) {
-        Alert.alert('OTP', String(res.otp));
+        if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
+          window.alert('OTP: ' + String(res.otp));
+        } else {
+          Alert.alert('OTP', String(res.otp));
+        }
       } else {
         notifySuccess('OTP has been sent successfully.');
       }
     } catch (e) {
-      notifyError('Unable to resend OTP. Please try again.');
+      const msg = e?.response?.data?.message || e?.message || 'Unable to resend OTP. Please try again.';
+      notifyError(msg);
     } finally {
       setResendLoading(false);
     }
