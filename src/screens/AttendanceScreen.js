@@ -197,16 +197,60 @@ export default function AttendanceScreen({ navigation }) {
     setNotifOpen(false);
   };
 
-  const canPunchIn = !status?.punchedInAt;
-  const canPunchOut = !!status?.punchedInAt && !status?.punchedOutAt;
   const isOnBreak = !!status?.isOnBreak;
-
   const workingSeconds = Number(status?.totalDurationSeconds || status?.workingSeconds || 0);
   const breakSeconds = Number(status?.breakSeconds || 0);
   const overtimeSeconds = Number(status?.overtimeSeconds || 0);
   const dayStatus = status?.dayStatus || 'ABSENT';
   const assignedShift = status?.assignedShift || cachedShift || null;
   const isRestricted = !!status?.mobilePunchRestricted;
+
+  const rawShiftSlots = useMemo(() => {
+    if (!assignedShift) return [];
+    if (Array.isArray(assignedShift.timeSlots)) return assignedShift.timeSlots;
+    if (typeof assignedShift.timeSlots === 'string') {
+      try { return JSON.parse(assignedShift.timeSlots); } catch (_) { return []; }
+    }
+    if (Array.isArray(assignedShift.time_slots)) return assignedShift.time_slots;
+    if (typeof assignedShift.time_slots === 'string') {
+      try { return JSON.parse(assignedShift.time_slots); } catch (_) { return []; }
+    }
+    return [];
+  }, [assignedShift]);
+
+  const isMultiSlot = rawShiftSlots.length > 1;
+  const todayPunches = Array.isArray(status?.todayPunches) ? status.todayPunches : [];
+  const activePunch = status?.activePunch || null;
+  const completedSlotsCount = todayPunches.filter(p => p.status === 'COMPLETED').length;
+  const totalSlotsCount = isMultiSlot ? rawShiftSlots.length : 1;
+
+  let canPunchIn = false;
+  let canPunchOut = false;
+  let punchInText = 'Punch in';
+  let punchOutText = 'Punch out';
+
+  if (isMultiSlot) {
+    const hasActive = !!activePunch;
+    if (hasActive) {
+      canPunchIn = false;
+      canPunchOut = true;
+      const slotNum = activePunch?.slotNumber || activePunch?.punchNumber || (completedSlotsCount + 1);
+      punchOutText = `Punch out (Slot ${slotNum})`;
+    } else if (completedSlotsCount < totalSlotsCount) {
+      canPunchIn = true;
+      canPunchOut = false;
+      const nextSlot = completedSlotsCount + 1;
+      punchInText = `Punch in (Slot ${nextSlot})`;
+    } else {
+      canPunchIn = false;
+      canPunchOut = false;
+      punchInText = 'Shift Completed';
+    }
+  } else {
+    // Single Shift (exact original logic)
+    canPunchIn = !status?.punchedInAt;
+    canPunchOut = !!status?.punchedInAt && !status?.punchedOutAt;
+  }
 
   const shiftLabel = useMemo(() => {
     if (assignedShift) {
@@ -215,15 +259,19 @@ export default function AttendanceScreen({ navigation }) {
         const mins = Number(assignedShift.workMinutes || 0);
         return `${assignedShift.name || 'Open Shift'} • ${mins} mins`;
       }
-      const start = assignedShift.startTime || '--:--';
-      const end = assignedShift.endTime || '--:--';
+      if (isMultiSlot) {
+        const slotsStr = rawShiftSlots.map(s => `${(s.startTime || '').slice(0, 5)} - ${(s.endTime || '').slice(0, 5)}`).join(' | ');
+        return `${assignedShift.name || 'Shift'} • ${slotsStr}`;
+      }
+      const start = (assignedShift.startTime || '--:--').slice(0, 5);
+      const end = (assignedShift.endTime || '--:--').slice(0, 5);
       return `${assignedShift.name || 'Shift'} • ${start} - ${end}`;
     }
     if (refreshing || (!status && !cachedShift)) {
       return 'Loading shift...';
     }
     return 'General Shift (Active)';
-  }, [assignedShift, status, refreshing, cachedShift]);
+  }, [assignedShift, status, refreshing, cachedShift, isMultiSlot, rawShiftSlots]);
 
   const hh = Math.floor(workingSeconds / 3600);
   const mm = Math.floor((workingSeconds % 3600) / 60);
@@ -845,35 +893,60 @@ export default function AttendanceScreen({ navigation }) {
 
         <View style={styles.activityWrap}>
           <Text style={styles.sectionTitle}>Your Activity</Text>
-          {status?.punchedInAt ? (
-            <View style={styles.activityRow}>
-              <View style={styles.activityLeft}>
-                <Image source={require('../assets/v2.png')} style={{ width: 14, height: 14 }} />
-                <Text style={styles.activityText}>Punch in</Text>
+          {isMultiSlot && todayPunches.length > 0 ? (
+            todayPunches.map((p, idx) => (
+              <View key={String(p.id || idx)} style={{ marginBottom: 8, paddingBottom: 8, borderBottomWidth: idx < todayPunches.length - 1 ? 1 : 0, borderBottomColor: '#f1f5f9' }}>
+                <View style={styles.activityRow}>
+                  <View style={styles.activityLeft}>
+                    <Image source={require('../assets/v2.png')} style={{ width: 14, height: 14 }} />
+                    <Text style={styles.activityText}>Slot {p.slotNumber || p.punchNumber || (idx + 1)} Punch in</Text>
+                  </View>
+                  <Text style={styles.activityTime}>{formatClock(p.punchedInAt)}</Text>
+                </View>
+                {p.punchedOutAt ? (
+                  <View style={[styles.activityRow, { marginTop: 4 }]}>
+                    <View style={styles.activityLeft}>
+                      <Image source={require('../assets/v2.png')} style={{ width: 14, height: 14 }} />
+                      <Text style={styles.activityText}>Slot {p.slotNumber || p.punchNumber || (idx + 1)} Punch out</Text>
+                    </View>
+                    <Text style={styles.activityTime}>{formatClock(p.punchedOutAt)}</Text>
+                  </View>
+                ) : null}
               </View>
-              <Text style={styles.activityTime}>{formatClock(status?.punchedInAt)}</Text>
-            </View>
-          ) : null}
+            ))
+          ) : (
+            <>
+              {status?.punchedInAt ? (
+                <View style={styles.activityRow}>
+                  <View style={styles.activityLeft}>
+                    <Image source={require('../assets/v2.png')} style={{ width: 14, height: 14 }} />
+                    <Text style={styles.activityText}>Punch in</Text>
+                  </View>
+                  <Text style={styles.activityTime}>{formatClock(status?.punchedInAt)}</Text>
+                </View>
+              ) : null}
 
-          {status?.punchedOutAt ? (
-            <View style={styles.activityRow}>
-              <View style={styles.activityLeft}>
-                <Image source={require('../assets/v2.png')} style={{ width: 14, height: 14 }} />
-                <Text style={styles.activityText}>Punch out</Text>
-              </View>
-              <Text style={styles.activityTime}>{formatClock(status?.punchedOutAt)}</Text>
-            </View>
-          ) : null}
+              {status?.punchedOutAt ? (
+                <View style={styles.activityRow}>
+                  <View style={styles.activityLeft}>
+                    <Image source={require('../assets/v2.png')} style={{ width: 14, height: 14 }} />
+                    <Text style={styles.activityText}>Punch out</Text>
+                  </View>
+                  <Text style={styles.activityTime}>{formatClock(status?.punchedOutAt)}</Text>
+                </View>
+              ) : null}
 
-          {!status?.punchedInAt && !status?.punchedOutAt ? (
-            <View style={styles.activityRow}>
-              <View style={styles.activityLeft}>
-                <Image source={require('../assets/v2.png')} style={{ width: 14, height: 14 }} />
-                <Text style={styles.activityText}>No activity yet</Text>
-              </View>
-              <Text style={styles.activityTime}>--</Text>
-            </View>
-          ) : null}
+              {!status?.punchedInAt && !status?.punchedOutAt ? (
+                <View style={styles.activityRow}>
+                  <View style={styles.activityLeft}>
+                    <Image source={require('../assets/v2.png')} style={{ width: 14, height: 14 }} />
+                    <Text style={styles.activityText}>No activity yet</Text>
+                  </View>
+                  <Text style={styles.activityTime}>--</Text>
+                </View>
+              ) : null}
+            </>
+          )}
         </View>
 
         {/* spacer removed; bottom padding on ScrollView handles safe space */}
@@ -881,10 +954,10 @@ export default function AttendanceScreen({ navigation }) {
 
       <View style={styles.footerActions}>
         <TouchableOpacity style={[styles.btnDanger, (!canPunchOut || isRestricted) ? styles.btnDisabled : null]} onPress={onPunchOut} disabled={!canPunchOut || isRestricted || loading}>
-          {loading && canPunchOut ? <ActivityIndicator color="#fff" /> : <Text style={[styles.btnDangerText, (!canPunchOut || isRestricted) ? styles.btnDisabledText : null]}>Punch out</Text>}
+          {loading && canPunchOut ? <ActivityIndicator color="#fff" /> : <Text style={[styles.btnDangerText, (!canPunchOut || isRestricted) ? styles.btnDisabledText : null]}>{punchOutText}</Text>}
         </TouchableOpacity>
         <TouchableOpacity style={[styles.btnDisabled, (canPunchIn && !isRestricted) ? styles.btnPrimary : null]} onPress={onPunchIn} disabled={!canPunchIn || isRestricted || loading}>
-          {loading && canPunchIn ? <ActivityIndicator color="#fff" /> : <Text style={[styles.btnDisabledText, (canPunchIn && !isRestricted) ? styles.btnPrimaryText : null]}>Punch in</Text>}
+          {loading && canPunchIn ? <ActivityIndicator color="#fff" /> : <Text style={[styles.btnDisabledText, (canPunchIn && !isRestricted) ? styles.btnPrimaryText : null]}>{punchInText}</Text>}
         </TouchableOpacity>
       </View>
 

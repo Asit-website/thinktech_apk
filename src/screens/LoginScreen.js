@@ -21,12 +21,6 @@ export default function LoginScreen({ navigation }) {
 
   const showError = (msg) => {
     setErrorMsg(msg);
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
-      window.alert(msg);
-    } else {
-      Alert.alert('Notice', msg, [{ text: 'OK' }]);
-    }
-    notifyError(msg);
   };
 
   const handleSendOtp = async () => {
@@ -40,13 +34,6 @@ export default function LoginScreen({ navigation }) {
     try {
       const res = await sendOtp(sanitized);
       if (res?.success) {
-        if (res?.otp) {
-          if (Platform.OS === 'web' && typeof window !== 'undefined' && window.alert) {
-            window.alert('OTP: ' + String(res.otp));
-          } else {
-            Alert.alert('OTP', String(res.otp));
-          }
-        }
         navigation.navigate('OTP', { phone: sanitized, otp: res?.otp ? String(res.otp) : undefined });
       } else {
         const msg = res?.message || 'Failed to send OTP';
