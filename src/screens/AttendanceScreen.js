@@ -845,6 +845,7 @@ export default function AttendanceScreen({ navigation }) {
           <QuickAction title="Leave" icon={require('../assets/leave1.png')} onPress={() => navigation.navigate('Leave')} />
           <QuickAction title="History" icon={require('../assets/leave2.png')} onPress={() => navigation.navigate('History')} />
           <QuickAction title="Calendar" icon={require('../assets/leave3.png')} onPress={() => navigation.navigate('Calendar')} />
+          <QuickAction title="Regularize" icon={require('../assets/journal-check.png')} onPress={() => navigation.navigate('Calendar', { initialTab: 'regularization' })} />
           <QuickAction title="QR Punch" icon={require('../assets/tab1.png')} onPress={() => {
             if (status?.qrPunchRestricted) {
               if (Platform.OS === 'web') {

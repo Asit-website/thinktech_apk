@@ -273,6 +273,17 @@ export async function getAttendanceHistory(month) {
   return resp.data;
 }
 
+export async function applyRegularization(payload) {
+  const resp = await api.post('/attendance/regularization', payload);
+  return resp.data;
+}
+
+export async function getMyRegularizations(month) {
+  const qs = month ? `?month=${encodeURIComponent(String(month))}` : '';
+  const resp = await api.get(`/attendance/regularization/my${qs}`);
+  return resp.data;
+}
+
 export async function getAttendanceReport(date) {
   const qs = date ? `?date=${encodeURIComponent(date)}` : '';
   const resp = await api.get(`/attendance/report${qs}`);
