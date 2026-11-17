@@ -259,7 +259,8 @@ export default function ExpenseScreen() {
         } else notifyError(res?.message || 'Failed to submit expense');
       }
     } catch (e) {
-      notifyError(e?.response?.data?.message || (editingClaim?.id ? 'Failed to update expense' : 'Failed to submit expense'));
+      console.error('Submit expense error:', e);
+      notifyError(e?.response?.data?.message || e?.message || (editingClaim?.id ? 'Failed to update expense' : 'Failed to submit expense'));
     } finally {
       setSubmitting(false);
     }

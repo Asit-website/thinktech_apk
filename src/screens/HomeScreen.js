@@ -1,10 +1,12 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { SafeAreaView, View, Text, TouchableOpacity, StyleSheet, Image, Alert, Platform } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { usePermissions } from '../contexts/PermissionsContext';
+import { getTeamLeaderStatus } from '../config/api';
 
 export default function HomeScreen({ navigation }) {
   const { hasPermission, subscriptionInfo, refreshData, loading: permissionLoading } = usePermissions();
+  const [isTeamLeader, setIsTeamLeader] = useState(false);
 
   useFocusEffect(
     useCallback(() => {

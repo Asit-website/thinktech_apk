@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { SafeAreaView, View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Platform, Modal } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import BottomNav from '../components/BottomNav';
-import { endBreak, getAttendanceStatus, punchInWithPhoto, punchOutWithPhoto, startBreak, listMyLeaveRequests, getMyLeaveCategories, getMyProfile, API_BASE_URL } from '../config/api';
+import { endBreak, getAttendanceStatus, punchInWithPhoto, punchOutWithPhoto, startBreak, listMyLeaveRequests, getMyLeaveCategories, getMyProfile, API_BASE_URL, getTeamLeaderStatus } from '../config/api';
 import { formatAddress, locationTrackingService } from '../services/locationService';
 // NOTE: Avoid static import of expo-location on web to prevent bundler crash; use dynamic import when needed
 import { notifyError, notifyInfo, notifySuccess } from '../utils/notify';
@@ -24,7 +25,35 @@ export default function AttendanceScreen({ navigation }) {
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [cachedShift, setCachedShift] = useState(null);
   const [showLocationDisclosure, setShowLocationDisclosure] = useState(false);
+  const [isTeamLeader, setIsTeamLeader] = useState(false);
+  const [teamLeaderInfo, setTeamLeaderInfo] = useState(null);
   const pendingPunchInRef = React.useRef(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        try {
+          const res = await getTeamLeaderStatus();
+          if (active) {
+            if (res?.success && res.isTeamLeader) {
+              setIsTeamLeader(true);
+              setTeamLeaderInfo(res);
+            } else {
+              setIsTeamLeader(false);
+              setTeamLeaderInfo(null);
+            }
+          }
+        } catch (_) {
+          if (active) {
+            setIsTeamLeader(false);
+            setTeamLeaderInfo(null);
+          }
+        }
+      })();
+      return () => { active = false; };
+    }, [])
+  );
 
   // Immediately hydrate cached status on mount so shift and stats render with 0ms delay
   useEffect(() => {
@@ -890,6 +919,13 @@ export default function AttendanceScreen({ navigation }) {
               }
             }
           }} />
+          {isTeamLeader && (
+            <QuickAction
+              title="My Team"
+              icon={require('../assets/tab3.png')}
+              onPress={() => navigation.navigate('TeamManagement')}
+            />
+          )}
         </View>
 
         <View style={styles.activityWrap}>
@@ -1440,6 +1476,71 @@ const styles = StyleSheet.create({
     color: '#454545',
     fontFamily: 'Inter_600SemiBold',
     fontSize: 18,
+  },
+  teamLeaderBanner: {
+    backgroundColor: '#0F3B8C',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#0F3B8C',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  teamLeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  teamLeaderIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  teamLeaderTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Inter_700Bold',
+  },
+  teamLeaderBadge: {
+    backgroundColor: '#38BDF8',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 6,
+  },
+  teamLeaderBadgeText: {
+    color: '#0F172A',
+    fontSize: 9,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: 0.5,
+  },
+  teamLeaderSub: {
+    color: '#BAE6FD',
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
+    marginTop: 2,
+  },
+  teamLeaderArrowCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+  },
+  teamLeaderArrow: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   grid: {
     flexDirection: 'row',

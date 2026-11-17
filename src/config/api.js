@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
 const API_BASE_URL = __DEV__
-  ? 'http://localhost:4000'  // Local development
+  ? 'https://backend.vetansutra.com'  // Local development
   : process.env.API_URL || 'https://backend.vetansutra.com';  // Production from EAS env or fallback
 
 export { API_BASE_URL };
@@ -980,12 +980,8 @@ export async function submitOrder({
 }
 
 // Expenses (mobile: staff submit expenses)
-export async function submitExpense({ expenseType, expenseDate, expenses = [] } = {}) {
-  const form = new FormData();
-  if (expenseType) form.append('expenseType', expenseType);
-  if (expenseDate) form.append('expenseDate', typeof expenseDate === 'string' ? expenseDate : new Date(expenseDate).toISOString());
-
-  const serializedItems = await Promise.all(expenses.map(async (exp, index) => {
+export async function submitExpense({ expenseType, expenseDate, expenses = [], description } = {}) {
+  const serializedItems = expenses.map((exp) => {
     const item = {
       expenseType: exp.expenseType || 'Other',
       amount: Number(exp.amount || 0),
@@ -997,10 +993,35 @@ export async function submitExpense({ expenseType, expenseDate, expenses = [] } 
       item.travelTo = exp.travelTo || null;
       item.mode = exp.mode || null;
     }
+    return item;
+  });
+
+  const hasAttachments = expenses.some((exp) => exp.attachment && exp.attachment.uri);
+
+  if (!hasAttachments) {
+    // Send clean JSON payload (completely avoids React Native FormData / multipart bugs on Android)
+    const payload = {
+      expenseType: expenseType || (expenses[0]?.expenseType || 'Other'),
+      expenseDate: typeof expenseDate === 'string' ? expenseDate : new Date(expenseDate || Date.now()).toISOString().slice(0, 10),
+      description: description || null,
+      items: serializedItems,
+    };
+    const resp = await api.post('/me/expenses', payload);
+    return resp.data;
+  }
+
+  // When attachments are present, build FormData
+  const form = new FormData();
+  if (expenseType) form.append('expenseType', expenseType);
+  if (expenseDate) form.append('expenseDate', typeof expenseDate === 'string' ? expenseDate : new Date(expenseDate).toISOString().slice(0, 10));
+  if (description) form.append('description', description);
+
+  for (let index = 0; index < expenses.length; index++) {
+    const exp = expenses[index];
     const attachment = exp.attachment;
     if (attachment && attachment.uri) {
-      const name = attachment.name || (attachment.uri.split('/').pop() || 'attachment');
-      const type = attachment.type || 'application/octet-stream';
+      const name = attachment.name || (attachment.uri.split('/').pop() || 'attachment.jpg');
+      const type = attachment.type || 'image/jpeg';
       if (Platform.OS === 'web') {
         const r = await fetch(attachment.uri);
         const blob = await r.blob();
@@ -1010,22 +1031,43 @@ export async function submitExpense({ expenseType, expenseDate, expenses = [] } 
         form.append(`attachment_${index}`, { uri: attachment.uri, name, type });
       }
     }
-    return item;
-  }));
+  }
 
   form.append('items', JSON.stringify(serializedItems));
 
-  const resp = await api.post('/me/expenses', form);
-  return resp.data;
+  if (Platform.OS === 'web') {
+    const resp = await api.post('/me/expenses', form);
+    return resp.data;
+  } else {
+    // Native fetch handles multipart FormData reliably on Android/iOS without Axios boundary corruption
+    const token = await AsyncStorage.getItem('auth_token');
+    const deviceFingerprint = await AsyncStorage.getItem('device_fingerprint');
+    const fetchHeaders = {
+      'Accept': 'application/json',
+      'X-App-Platform': 'mobile-apk',
+    };
+    if (token) fetchHeaders['Authorization'] = `Bearer ${token}`;
+    if (deviceFingerprint) fetchHeaders['x-device-fingerprint'] = deviceFingerprint;
+
+    const fetchResp = await fetch(`${API_BASE_URL}/me/expenses`, {
+      method: 'POST',
+      headers: fetchHeaders,
+      body: form,
+    });
+    const data = await fetchResp.json();
+    return data;
+  }
 }
 
 export async function updateExpense(id, { expenseType, expenseDate, expenses = [], amount, billNumber, description, attachment, travelFrom, travelTo, mode } = {}) {
-  const form = new FormData();
-  if (expenseType) form.append('expenseType', expenseType);
-  if (expenseDate) form.append('expenseDate', typeof expenseDate === 'string' ? expenseDate : new Date(expenseDate).toISOString());
+  const isMultiple = Array.isArray(expenses) && expenses.length > 0;
+  const hasAttachments = isMultiple
+    ? expenses.some((exp) => exp.attachment && exp.attachment.uri)
+    : Boolean(attachment && attachment.uri);
 
-  if (Array.isArray(expenses) && expenses.length > 0) {
-    const serializedItems = await Promise.all(expenses.map(async (exp, index) => {
+  let serializedItems = null;
+  if (isMultiple) {
+    serializedItems = expenses.map((exp) => {
       const item = {
         expenseType: exp.expenseType || 'Other',
         amount: Number(exp.amount || 0),
@@ -1037,10 +1079,41 @@ export async function updateExpense(id, { expenseType, expenseDate, expenses = [
         item.travelTo = exp.travelTo || null;
         item.mode = exp.mode || null;
       }
+      return item;
+    });
+  }
+
+  if (!hasAttachments) {
+    const payload = {
+      expenseType: expenseType || (isMultiple ? expenses[0]?.expenseType : 'Other'),
+      expenseDate: expenseDate ? (typeof expenseDate === 'string' ? expenseDate : new Date(expenseDate).toISOString().slice(0, 10)) : undefined,
+      description: description || (isMultiple ? expenses[0]?.description : undefined),
+    };
+    if (isMultiple) {
+      payload.items = serializedItems;
+    } else {
+      if (amount !== undefined) payload.amount = Number(amount) || 0;
+      if (billNumber) payload.billNumber = billNumber;
+      if (travelFrom) payload.travelFrom = travelFrom;
+      if (travelTo) payload.travelTo = travelTo;
+      if (mode) payload.mode = mode;
+    }
+    const resp = await api.put(`/me/expenses/${id}`, payload);
+    return resp.data;
+  }
+
+  // When attachments are present, build FormData
+  const form = new FormData();
+  if (expenseType) form.append('expenseType', expenseType);
+  if (expenseDate) form.append('expenseDate', typeof expenseDate === 'string' ? expenseDate : new Date(expenseDate).toISOString().slice(0, 10));
+
+  if (isMultiple) {
+    for (let index = 0; index < expenses.length; index++) {
+      const exp = expenses[index];
       const att = exp.attachment;
       if (att && att.uri) {
-        const name = att.name || (att.uri.split('/').pop() || 'attachment');
-        const type = att.type || 'application/octet-stream';
+        const name = att.name || (att.uri.split('/').pop() || 'attachment.jpg');
+        const type = att.type || 'image/jpeg';
         if (Platform.OS === 'web') {
           const r = await fetch(att.uri);
           const blob = await r.blob();
@@ -1050,8 +1123,7 @@ export async function updateExpense(id, { expenseType, expenseDate, expenses = [
           form.append(`attachment_${index}`, { uri: att.uri, name, type });
         }
       }
-      return item;
-    }));
+    }
     form.append('items', JSON.stringify(serializedItems));
   } else {
     if (amount !== undefined) form.append('amount', String(Number(amount) || 0));
@@ -1062,8 +1134,8 @@ export async function updateExpense(id, { expenseType, expenseDate, expenses = [
     if (mode) form.append('mode', mode);
 
     if (attachment && attachment.uri) {
-      const name = attachment.name || (attachment.uri.split('/').pop() || 'attachment');
-      const type = attachment.type || 'application/octet-stream';
+      const name = attachment.name || (attachment.uri.split('/').pop() || 'attachment.jpg');
+      const type = attachment.type || 'image/jpeg';
       if (Platform.OS === 'web') {
         const r = await fetch(attachment.uri);
         const blob = await r.blob();
@@ -1075,8 +1147,27 @@ export async function updateExpense(id, { expenseType, expenseDate, expenses = [
     }
   }
 
-  const resp = await api.put(`/me/expenses/${id}`, form);
-  return resp.data;
+  if (Platform.OS === 'web') {
+    const resp = await api.put(`/me/expenses/${id}`, form);
+    return resp.data;
+  } else {
+    const token = await AsyncStorage.getItem('auth_token');
+    const deviceFingerprint = await AsyncStorage.getItem('device_fingerprint');
+    const fetchHeaders = {
+      'Accept': 'application/json',
+      'X-App-Platform': 'mobile-apk',
+    };
+    if (token) fetchHeaders['Authorization'] = `Bearer ${token}`;
+    if (deviceFingerprint) fetchHeaders['x-device-fingerprint'] = deviceFingerprint;
+
+    const fetchResp = await fetch(`${API_BASE_URL}/me/expenses/${id}`, {
+      method: 'PUT',
+      headers: fetchHeaders,
+      body: form,
+    });
+    const data = await fetchResp.json();
+    return data;
+  }
 }
 
 export async function getMyExpenses() {
@@ -1181,5 +1272,56 @@ export async function listMyVisits() {
 
 export async function listMyOrders() {
   const resp = await api.get('/sales/my-orders');
+  return resp.data;
+}
+
+// Team Leader APIs
+export async function getTeamLeaderStatus() {
+  const resp = await api.get('/staff/team/status');
+  return resp.data;
+}
+
+export async function getTeamMembers(search) {
+  const resp = await api.get('/staff/team/members', { params: { search: search || undefined } });
+  return resp.data;
+}
+
+export async function getTeamMemberProfile(userId) {
+  const resp = await api.get('/staff/team/members/' + userId + '/profile');
+  return resp.data;
+}
+
+export async function getTeamAttendance(date) {
+  const resp = await api.get('/staff/team/attendance', { params: { date } });
+  return resp.data;
+}
+
+export async function updateTeamAttendance(payload) {
+  const resp = await api.post('/staff/team/attendance/update', payload);
+  return resp.data;
+}
+
+export async function getTeamRegularizations(status) {
+  const resp = await api.get('/staff/team/regularizations', { params: { status: status || undefined } });
+  return resp.data;
+}
+
+export async function reviewTeamRegularization(id, status, adminRemarks) {
+  const resp = await api.patch('/staff/team/regularization/' + id, { status, adminRemarks });
+  return resp.data;
+}
+
+export async function getTeamLateApprovals(status) {
+  const resp = await api.get('/staff/team/late-approvals', { params: { status: status || undefined } });
+  return resp.data;
+}
+
+export async function reviewTeamLateApproval(id, status, adminRemarks) {
+  const resp = await api.patch('/staff/team/late-approval/' + id + '/review', { status, adminRemarks });
+  return resp.data;
+}
+
+export async function getTeamDashboardStats() {
+  const resp = await api.get('/staff/team/dashboard');
   return resp.data;
 }
