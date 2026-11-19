@@ -89,7 +89,8 @@
         {
           "photosPermission": "Allow Godown Management to access your photos for slip images."
         }
-      ]
+      ],
+      "./plugins/withAndroidHardwareFeatures"
     ],
     "extra": {
       "eas": {
