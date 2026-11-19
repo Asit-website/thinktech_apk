@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   SafeAreaView,
   View,
@@ -447,12 +448,46 @@ export default function OrderHistoryScreen({ navigation }) {
         </Modal>
       )}
 
+
+      {/* Floating Add Order Button */}
+      <TouchableOpacity
+        style={styles.fabBtn}
+        activeOpacity={0.88}
+        onPress={() => navigation.navigate('OrderForm')}
+      >
+        <Text style={styles.fabBtnIcon}>+</Text>
+      </TouchableOpacity>
       <BottomNav navigation={navigation} activeKey="sales" />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  fabBtn: {
+    position: 'absolute',
+    right: 20,
+    bottom: 85,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#125EC9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 8,
+    zIndex: 999,
+  },
+  fabBtnIcon: {
+    color: '#ffffff',
+    fontSize: 34,
+    lineHeight: 38,
+    fontWeight: '700',
+    marginTop: -2,
+  },
+
   screen: {
     flex: 1,
     backgroundColor: '#ffffff',

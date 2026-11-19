@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { SafeAreaView, View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Platform, Modal } from 'react-native';
+import { SafeAreaView, View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Platform, Modal, TextInput, RefreshControl } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import BottomNav from '../components/BottomNav';
-import { endBreak, getAttendanceStatus, punchInWithPhoto, punchOutWithPhoto, startBreak, listMyLeaveRequests, getMyLeaveCategories, getMyProfile, API_BASE_URL, getTeamLeaderStatus } from '../config/api';
+import { endBreak, getAttendanceStatus, punchInWithPhoto, punchOutWithPhoto, startBreak, listMyLeaveRequests, getMyLeaveCategories, getMyProfile, API_BASE_URL, getTeamLeaderStatus, submitOutdoorDutyRequest, getMyOutdoorDutyRequests, cancelOutdoorDutyRequest } from '../config/api';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { formatAddress, locationTrackingService } from '../services/locationService';
 // NOTE: Avoid static import of expo-location on web to prevent bundler crash; use dynamic import when needed
 import { notifyError, notifyInfo, notifySuccess } from '../utils/notify';
@@ -23,6 +24,111 @@ export default function AttendanceScreen({ navigation }) {
   const [hasLeavePolicy, setHasLeavePolicy] = useState(false);
   const [user, setUser] = useState(null);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
+
+  // Outdoor Duty State
+  const [showOutdoorModal, setShowOutdoorModal] = useState(false);
+  const [odTab, setOdTab] = useState('apply'); // 'apply' | 'history'
+  const [odDates, setOdDates] = useState([new Date().toISOString().slice(0, 10)]);
+  const [odLocation, setOdLocation] = useState('');
+  const [odClient, setOdClient] = useState('');
+  const [odReason, setOdReason] = useState('');
+  const [odRemarks, setOdRemarks] = useState('');
+  const [odFromTime, setOdFromTime] = useState('');
+  const [odToTime, setOdToTime] = useState('');
+  const [odSubmitting, setOdSubmitting] = useState(false);
+  const [myOdList, setMyOdList] = useState([]);
+  const [myOdLoading, setMyOdLoading] = useState(false);
+  const [showOdDatePicker, setShowOdDatePicker] = useState(false);
+
+  const loadMyOdRequests = async () => {
+    setMyOdLoading(true);
+    try {
+      const resp = await getMyOutdoorDutyRequests();
+      if (resp?.success) {
+        setMyOdList(resp.list || []);
+      }
+    } catch (e) {
+      console.error('Failed to load outdoor duty requests:', e);
+    } finally {
+      setMyOdLoading(false);
+    }
+  };
+
+  const handleSubmittingOutdoor = async () => {
+    if (!odLocation.trim()) {
+      notifyError('Please enter visit location');
+      return;
+    }
+    if (!odReason.trim()) {
+      notifyError('Please enter reason for outdoor duty');
+      return;
+    }
+    if (odDates.length === 0) {
+      notifyError('Please select at least one date');
+      return;
+    }
+    setOdSubmitting(true);
+    try {
+      const resp = await submitOutdoorDutyRequest({
+        dates: odDates,
+        visitLocation: odLocation.trim(),
+        clientName: odClient.trim() || undefined,
+        reason: odReason.trim(),
+        remarks: odRemarks.trim() || undefined,
+        fromTime: odFromTime.trim() || undefined,
+        toTime: odToTime.trim() || undefined
+      });
+      if (resp?.success) {
+        notifySuccess('Outdoor duty request submitted successfully!');
+        setOdLocation('');
+        setOdClient('');
+        setOdReason('');
+        setOdRemarks('');
+        setOdFromTime('');
+        setOdToTime('');
+        setOdDates([new Date().toISOString().slice(0, 10)]);
+        setOdTab('history');
+        loadMyOdRequests();
+      } else {
+        notifyError(resp?.message || 'Failed to submit request');
+      }
+    } catch (err) {
+      notifyError(err.response?.data?.message || 'Failed to submit outdoor duty request');
+    } finally {
+      setOdSubmitting(false);
+    }
+  };
+
+  const handleCancelOdRequest = async (id) => {
+    try {
+      const resp = await cancelOutdoorDutyRequest(id);
+      if (resp?.success) {
+        notifySuccess('Request cancelled');
+        loadMyOdRequests();
+      } else {
+        notifyError(resp?.message || 'Failed to cancel');
+      }
+    } catch (e) {
+      notifyError('Failed to cancel request');
+    }
+  };
+
+  const onPickOdDate = () => {
+    if (Platform.OS === 'android' && DateTimePickerAndroid && DateTimePickerAndroid.open) {
+      DateTimePickerAndroid.open({
+        value: new Date(),
+        onChange: (_e, val) => {
+          if (val) {
+            const dateStr = val.toISOString().slice(0, 10);
+            setOdDates(prev => prev.includes(dateStr) ? prev : [...prev, dateStr].sort());
+          }
+        },
+        mode: 'date'
+      });
+    } else {
+      setShowOdDatePicker(true);
+    }
+  };
   const [cachedShift, setCachedShift] = useState(null);
   const [showLocationDisclosure, setShowLocationDisclosure] = useState(false);
   const [isTeamLeader, setIsTeamLeader] = useState(false);
@@ -874,7 +980,9 @@ export default function AttendanceScreen({ navigation }) {
           <QuickAction title="Leave" icon={require('../assets/leave1.png')} onPress={() => navigation.navigate('Leave')} />
           <QuickAction title="History" icon={require('../assets/leave2.png')} onPress={() => navigation.navigate('History')} />
           <QuickAction title="Calendar" icon={require('../assets/leave3.png')} onPress={() => navigation.navigate('Calendar')} />
-          <QuickAction title="Regularize" icon={require('../assets/journal-check.png')} onPress={() => navigation.navigate('Calendar', { initialTab: 'regularization' })} />
+          <QuickAction title="Attendance Post Approval" icon={require('../assets/journal-check.png')} onPress={() => navigation.navigate('Calendar', { initialTab: 'regularization' })} />
+          <QuickAction title="Attendance Pre Approval" icon={require('../assets/leave1.png')} onPress={() => { loadMyOdRequests(); setShowOutdoorModal(true); }} />
+          <QuickAction title="Advance" icon={require('../assets/currency-rupee.png')} onPress={() => navigation.navigate('Advance')} />
           <QuickAction title="QR Punch" icon={require('../assets/tab1.png')} onPress={() => {
             if (status?.qrPunchRestricted) {
               if (Platform.OS === 'web') {
@@ -1126,6 +1234,424 @@ export default function AttendanceScreen({ navigation }) {
           </View>
         </View>
       </Modal>
+
+      {/* OUTDOOR DUTY MODAL */}
+      <Modal
+        visible={showOutdoorModal}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setShowOutdoorModal(false)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }}>
+          {/* Header */}
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingHorizontal: 16,
+            paddingVertical: 14,
+            backgroundColor: '#FFFFFF',
+            borderBottomWidth: 1,
+            borderBottomColor: '#E2E8F0'
+          }}>
+            <View>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: '#0F172A' }}>Attendance Pre Approval</Text>
+              <Text style={{ fontSize: 12, color: '#64748B' }}>Client visits, tours & external duty</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => setShowOutdoorModal(false)}
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                backgroundColor: '#F1F5F9',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <Text style={{ fontSize: 18, fontWeight: '700', color: '#64748B' }}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Sub Tabs: Apply vs History */}
+          <View style={{
+            flexDirection: 'row',
+            backgroundColor: '#FFFFFF',
+            paddingHorizontal: 16,
+            paddingVertical: 8,
+            gap: 12,
+            borderBottomWidth: 1,
+            borderBottomColor: '#E2E8F0'
+          }}>
+            <TouchableOpacity
+              style={{
+                flex: 1,
+                paddingVertical: 10,
+                borderRadius: 10,
+                alignItems: 'center',
+                backgroundColor: odTab === 'apply' ? '#0D9488' : '#F1F5F9'
+              }}
+              onPress={() => setOdTab('apply')}
+            >
+              <Text style={{
+                fontSize: 13,
+                fontWeight: '600',
+                color: odTab === 'apply' ? '#FFFFFF' : '#475569'
+              }}>
+                Apply Request
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{
+                flex: 1,
+                paddingVertical: 10,
+                borderRadius: 10,
+                alignItems: 'center',
+                backgroundColor: odTab === 'history' ? '#0D9488' : '#F1F5F9'
+              }}
+              onPress={() => { setOdTab('history'); loadMyOdRequests(); }}
+            >
+              <Text style={{
+                fontSize: 13,
+                fontWeight: '600',
+                color: odTab === 'history' ? '#FFFFFF' : '#475569'
+              }}>
+                My Requests ({myOdList.length})
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {odTab === 'apply' ? (
+            <ScrollView style={{ flex: 1, padding: 16 }} contentContainerStyle={{ paddingBottom: 50 }}>
+              {/* Selected Dates Section */}
+              <View style={{ marginBottom: 16 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B', marginBottom: 6 }}>
+                  Request Date(s) *
+                </Text>
+                <Text style={{ fontSize: 11, color: '#64748B', marginBottom: 8 }}>
+                  You can select multiple dates (e.g. 6-7 dates for tours or visits)
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                  {odDates.map((d) => (
+                    <View
+                      key={d}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        backgroundColor: '#E0F2FE',
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: '#BAE6FD'
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: '#0369A1', marginRight: 6 }}>{d}</Text>
+                      {odDates.length > 1 && (
+                        <TouchableOpacity onPress={() => setOdDates(prev => prev.filter(x => x !== d))}>
+                          <Text style={{ fontSize: 13, color: '#0369A1', fontWeight: 'bold' }}>×</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ))}
+                  <TouchableOpacity
+                    onPress={onPickOdDate}
+                    style={{
+                      paddingHorizontal: 12,
+                      paddingVertical: 6,
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: '#0D9488',
+                      borderStyle: 'dashed',
+                      backgroundColor: '#F0FDFA'
+                    }}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#0D9488' }}>+ Add Date</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Location Input */}
+              <View style={{ marginBottom: 14 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B', marginBottom: 6 }}>
+                  Visit Location *
+                </Text>
+                <TextInput
+                  style={{
+                    backgroundColor: '#FFFFFF',
+                    borderWidth: 1,
+                    borderColor: '#CBD5E1',
+                    borderRadius: 10,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    fontSize: 14,
+                    color: '#0F172A'
+                  }}
+                  placeholder="e.g. Head Office / Client Site / Noida Sector 62"
+                  placeholderTextColor="#94A3B8"
+                  value={odLocation}
+                  onChangeText={setOdLocation}
+                />
+              </View>
+
+              {/* Client Name Input */}
+              <View style={{ marginBottom: 14 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B', marginBottom: 6 }}>
+                  Client / Company Name (Optional)
+                </Text>
+                <TextInput
+                  style={{
+                    backgroundColor: '#FFFFFF',
+                    borderWidth: 1,
+                    borderColor: '#CBD5E1',
+                    borderRadius: 10,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    fontSize: 14,
+                    color: '#0F172A'
+                  }}
+                  placeholder="e.g. ABC Technologies Ltd"
+                  placeholderTextColor="#94A3B8"
+                  value={odClient}
+                  onChangeText={setOdClient}
+                />
+              </View>
+
+              {/* Timings row */}
+              <View style={{ flexDirection: 'row', gap: 12, marginBottom: 14 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B', marginBottom: 6 }}>
+                    From Time (Optional)
+                  </Text>
+                  <TextInput
+                    style={{
+                      backgroundColor: '#FFFFFF',
+                      borderWidth: 1,
+                      borderColor: '#CBD5E1',
+                      borderRadius: 10,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      fontSize: 14,
+                      color: '#0F172A'
+                    }}
+                    placeholder="e.g. 10:00 AM"
+                    placeholderTextColor="#94A3B8"
+                    value={odFromTime}
+                    onChangeText={setOdFromTime}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B', marginBottom: 6 }}>
+                    To Time (Optional)
+                  </Text>
+                  <TextInput
+                    style={{
+                      backgroundColor: '#FFFFFF',
+                      borderWidth: 1,
+                      borderColor: '#CBD5E1',
+                      borderRadius: 10,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      fontSize: 14,
+                      color: '#0F172A'
+                    }}
+                    placeholder="e.g. 06:00 PM"
+                    placeholderTextColor="#94A3B8"
+                    value={odToTime}
+                    onChangeText={setOdToTime}
+                  />
+                </View>
+              </View>
+
+              {/* Reason Input */}
+              <View style={{ marginBottom: 14 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B', marginBottom: 6 }}>
+                  Reason for Outdoor Duty *
+                </Text>
+                <TextInput
+                  style={{
+                    backgroundColor: '#FFFFFF',
+                    borderWidth: 1,
+                    borderColor: '#CBD5E1',
+                    borderRadius: 10,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    fontSize: 14,
+                    color: '#0F172A'
+                  }}
+                  placeholder="e.g. Client meeting / Site inspection / Audit"
+                  placeholderTextColor="#94A3B8"
+                  value={odReason}
+                  onChangeText={setOdReason}
+                />
+              </View>
+
+              {/* Remarks Input */}
+              <View style={{ marginBottom: 20 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#1E293B', marginBottom: 6 }}>
+                  Remarks (Optional)
+                </Text>
+                <TextInput
+                  style={{
+                    backgroundColor: '#FFFFFF',
+                    borderWidth: 1,
+                    borderColor: '#CBD5E1',
+                    borderRadius: 10,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    fontSize: 14,
+                    color: '#0F172A',
+                    minHeight: 60,
+                    textAlignVertical: 'top'
+                  }}
+                  multiline
+                  placeholder="Any additional notes or instructions"
+                  placeholderTextColor="#94A3B8"
+                  value={odRemarks}
+                  onChangeText={setOdRemarks}
+                />
+              </View>
+
+              {/* Submit Button */}
+              <TouchableOpacity
+                onPress={handleSubmittingOutdoor}
+                disabled={odSubmitting}
+                style={{
+                  backgroundColor: '#0D9488',
+                  paddingVertical: 14,
+                  borderRadius: 12,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  shadowColor: '#0D9488',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.2,
+                  shadowRadius: 4,
+                  elevation: 2
+                }}
+              >
+                {odSubmitting ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFFFFF' }}>Submit OD Request</Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          ) : (
+            <ScrollView
+              style={{ flex: 1, padding: 16 }}
+              refreshControl={<RefreshControl refreshing={myOdLoading} onRefresh={loadMyOdRequests} />}
+              contentContainerStyle={{ paddingBottom: 50 }}
+            >
+              {myOdLoading && myOdList.length === 0 ? (
+                <View style={{ padding: 40, alignItems: 'center' }}>
+                  <ActivityIndicator size="large" color="#0D9488" />
+                  <Text style={{ marginTop: 10, color: '#64748B' }}>Loading requests...</Text>
+                </View>
+              ) : myOdList.length === 0 ? (
+                <View style={{ padding: 40, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#64748B' }}>No requests submitted yet</Text>
+                  <Text style={{ fontSize: 13, color: '#94A3B8', marginTop: 4 }}>
+                    Use the 'Apply Request' tab to submit an outdoor duty request.
+                  </Text>
+                </View>
+              ) : (
+                myOdList.map((item) => {
+                  const isApproved = item.status === 'APPROVED';
+                  const isRejected = item.status === 'REJECTED';
+                  const badgeBg = isApproved ? '#DCFCE7' : (isRejected ? '#FEE2E2' : '#FEF3C7');
+                  const badgeColor = isApproved ? '#15803D' : (isRejected ? '#B91C1C' : '#B45309');
+
+                  return (
+                    <View
+                      key={item.id}
+                      style={{
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: 12,
+                        padding: 14,
+                        marginBottom: 12,
+                        borderWidth: 1,
+                        borderColor: '#E2E8F0',
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: 1 },
+                        shadowOpacity: 0.05,
+                        shadowRadius: 2,
+                        elevation: 1
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#0F172A' }}>📅 {item.date}</Text>
+                        <View style={{
+                          backgroundColor: badgeBg,
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                          borderRadius: 6
+                        }}>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: badgeColor }}>{item.status}</Text>
+                        </View>
+                      </View>
+
+                      <View style={{ marginBottom: 4 }}>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: '#0D9488' }}>📍 {item.visitLocation}</Text>
+                        {item.clientName ? (
+                          <Text style={{ fontSize: 12, color: '#2563EB', marginTop: 2 }}>Client: {item.clientName}</Text>
+                        ) : null}
+                      </View>
+
+                      <Text style={{ fontSize: 12, color: '#334155', marginTop: 2 }}>
+                        Reason: <Text style={{ fontWeight: '500' }}>{item.reason}</Text>
+                      </Text>
+
+                      {(item.fromTime || item.toTime) && (
+                        <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                          Timing: {item.fromTime || ''} - {item.toTime || ''}
+                        </Text>
+                      )}
+
+                      {item.rejectionReason && (
+                        <Text style={{ fontSize: 11, color: '#EF4444', marginTop: 4, fontStyle: 'italic' }}>
+                          Reason: {item.rejectionReason}
+                        </Text>
+                      )}
+
+                      {item.status === 'PENDING' && (
+                        <TouchableOpacity
+                          onPress={() => handleCancelOdRequest(item.id)}
+                          style={{
+                            alignSelf: 'flex-end',
+                            marginTop: 8,
+                            paddingHorizontal: 12,
+                            paddingVertical: 4,
+                            borderRadius: 6,
+                            backgroundColor: '#FEE2E2'
+                          }}
+                        >
+                          <Text style={{ fontSize: 11, fontWeight: '600', color: '#DC2626' }}>Cancel Request</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+          )}
+
+          {showOdDatePicker && (
+            <DateTimePicker
+              value={new Date()}
+              mode="date"
+              display="default"
+              onChange={(_e, val) => {
+                setShowOdDatePicker(false);
+                if (val) {
+                  const ds = val.toISOString().slice(0, 10);
+                  setOdDates(prev => prev.includes(ds) ? prev : [...prev, ds].sort());
+                }
+              }}
+            />
+          )}
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1136,7 +1662,7 @@ function QuickAction({ title, icon, onPress }) {
       <View style={styles.actionLeft}>
         <Image source={icon} style={{ width: 18, height: 18 }} />
         <View style={styles.actionLabelRow}>
-          <Text style={styles.actionText}>{title}</Text>
+          <Text style={styles.actionText} numberOfLines={2}>{title}</Text>
         </View>
       </View>
       <Image source={require('../assets/stoke.png')} style={{ width: 12, height: 12, tintColor: '#125EC9' }} />
@@ -1565,7 +2091,9 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'center',
     flexDirection: 'column',
-    gap: 4,
+    gap: 3,
+    flex: 1,
+    marginRight: 4,
   },
   actionLabelRow: {
     flexDirection: 'row',
@@ -1575,7 +2103,8 @@ const styles = StyleSheet.create({
   actionText: {
     color: '#125EC9',
     fontFamily: 'Inter_500Medium',
-    fontSize: 13,
+    fontSize: 11.5,
+    lineHeight: 14,
     marginTop: 2,
   },
   // bottom bar styles replaced by shared BottomNav

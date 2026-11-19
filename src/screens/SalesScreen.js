@@ -160,10 +160,8 @@ export default function SalesScreen({ navigation }) {
         </View>
 
         <View style={styles.grid}>
-          <QuickAction title="Visit Form" icon={require('../assets/visit1.png')} onPress={() => navigation.navigate('VisitForm')} />
-          <QuickAction title="Visit History" icon={require('../assets/visit1.png')} onPress={() => navigation.navigate('VisitHistory')} />
-          <QuickAction title="Order Form" icon={require('../assets/visit2.png')} onPress={() => navigation.navigate('OrderForm')} />
-          <QuickAction title="Order History" icon={require('../assets/visit2.png')} onPress={() => navigation.navigate('OrderHistory')} />
+          <QuickAction title="Visit" icon={require('../assets/visit1.png')} onPress={() => navigation.navigate('VisitHistory')} />
+          <QuickAction title="Order" icon={require('../assets/visit2.png')} onPress={() => navigation.navigate('OrderHistory')} />
           <QuickAction title="Assigned Job" icon={require('../assets/visit3.png')} onPress={() => navigation.navigate('AssignedJobs')} />
           <QuickAction title="Targets" icon={require('../assets/visit4.png')} onPress={() => navigation.navigate('Targets')} />
           <QuickAction title="Expense" icon={require('../assets/currency-rupee.png')} onPress={() => navigation.navigate('Expense')} />

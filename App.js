@@ -45,6 +45,7 @@ import AIChatScreen from './src/screens/AIChatScreen';
 import QRScannerScreen from './src/screens/QRScannerScreen';
 import SelfAppraisalScreen from './src/screens/SelfAppraisalScreen';
 import TeamManagementScreen from './src/screens/TeamManagementScreen';
+import AdvanceScreen from './src/screens/AdvanceScreen';
 import ToastHost from './src/components/ToastHost';
 import AndroidNotification from './src/components/AndroidNotification';
 import { setNotificationRef } from './src/utils/notify';
@@ -198,6 +199,7 @@ export default function App() {
               <Stack.Screen name="QRScanner" component={QRScannerScreen} options={{ headerShown: false }} />
               <Stack.Screen name="SelfAppraisal" component={SelfAppraisalScreen} options={{ headerShown: false }} />
               <Stack.Screen name="TeamManagement" component={TeamManagementScreen} options={{ headerShown: false }} />
+              <Stack.Screen name="Advance" component={AdvanceScreen} options={{ headerShown: false }} />
             </Stack.Navigator>
           </NavigationContainer>
         </PermissionsProvider>

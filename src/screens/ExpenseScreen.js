@@ -1,8 +1,9 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Image, TextInput, Platform, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, RefreshControl, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Image, TextInput, Platform, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, RefreshControl, StyleSheet, Linking } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
-import { submitExpense, updateExpense, getMyExpenses } from '../config/api';
+import { API_BASE_URL, submitExpense, updateExpense, getMyExpenses } from '../config/api';
 import { notifySuccess, notifyError } from '../utils/notify';
 
 export default function ExpenseScreen() {
@@ -15,7 +16,7 @@ export default function ExpenseScreen() {
 
   // List states
   const [claims, setClaims] = useState([]);
-  const [activeTab, setActiveTab] = useState('pending');
+  const [activeTab, setActiveTab] = useState('all');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -23,6 +24,11 @@ export default function ExpenseScreen() {
   useEffect(() => {
     setCurrentPage(1);
   }, [activeTab]);
+
+  const [filterStartDate, setFilterStartDate] = useState(null);
+  const [filterEndDate, setFilterEndDate] = useState(null);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [showFilterPicker, setShowFilterPicker] = useState(null);
 
   const [showTypePicker, setShowTypePicker] = useState(false);
   const [activeTypeIndex, setActiveTypeIndex] = useState(null);
@@ -266,6 +272,65 @@ export default function ExpenseScreen() {
     }
   };
 
+  const handleDownloadPdf = async (claim) => {
+    try {
+      if (!claim?.id) return;
+      const token = await AsyncStorage.getItem('auth_token');
+      const baseURL = API_BASE_URL || 'https://backend.vetansutra.com';
+      const url = `${baseURL}/me/expenses/${claim.id}/pdf?token=${encodeURIComponent(token || '')}`;
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.open(url, '_blank');
+      } else {
+        await Linking.openURL(url);
+      }
+    } catch (e) {
+      console.error('Error opening expense PDF:', e);
+      notifyError('Failed to open expense PDF');
+    }
+  };
+
+  const handleDownloadSummaryPdf = async () => {
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const baseURL = API_BASE_URL || 'https://backend.vetansutra.com';
+      const params = [];
+      if (token) params.push(`token=${encodeURIComponent(token)}`);
+      if (activeTab && activeTab !== 'all') params.push(`status=${encodeURIComponent(activeTab)}`);
+      if (filterStartDate) params.push(`startDate=${filterStartDate.toISOString().slice(0, 10)}`);
+      if (filterEndDate) params.push(`endDate=${filterEndDate.toISOString().slice(0, 10)}`);
+
+      const queryString = params.length > 0 ? `?${params.join('&')}` : '';
+      const url = `${baseURL}/me/expenses/report/pdf${queryString}`;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.open(url, '_blank');
+      } else {
+        await Linking.openURL(url);
+      }
+    } catch (e) {
+      console.error('Error opening summary PDF:', e);
+      notifyError('Failed to open summary PDF');
+    }
+  };
+
+  const onPickFilterDate = (type) => {
+    const curr = type === 'start' ? (filterStartDate || new Date()) : (filterEndDate || new Date());
+    if (Platform.OS === 'android' && DateTimePickerAndroid && DateTimePickerAndroid.open) {
+      DateTimePickerAndroid.open({
+        value: curr,
+        onChange: (_e, val) => {
+          if (val) {
+            if (type === 'start') setFilterStartDate(val);
+            else setFilterEndDate(val);
+          }
+        },
+        mode: 'date'
+      });
+    } else {
+      setShowFilterPicker(type);
+    }
+  };
+
   const formatDate = (dateStr) => {
     if (!dateStr) return '';
     try {
@@ -290,7 +355,20 @@ export default function ExpenseScreen() {
     return '#E65100';
   };
 
-  const filteredClaims = claims.filter(c => (c.status || 'pending').toLowerCase() === activeTab);
+  const filteredClaims = claims.filter(c => {
+    if (activeTab !== 'all' && (c.status || 'pending').toLowerCase() !== activeTab) {
+      return false;
+    }
+    if (filterStartDate) {
+      const startStr = filterStartDate.toISOString().slice(0, 10);
+      if (String(c.expenseDate).slice(0, 10) < startStr) return false;
+    }
+    if (filterEndDate) {
+      const endStr = filterEndDate.toISOString().slice(0, 10);
+      if (String(c.expenseDate).slice(0, 10) > endStr) return false;
+    }
+    return true;
+  });
 
   const itemsPerPage = 3;
   const totalPages = Math.ceil(filteredClaims.length / itemsPerPage);
@@ -320,18 +398,25 @@ export default function ExpenseScreen() {
         </View>
 
         {/* Tab switcher */}
-        <View style={{ flexDirection: 'row', paddingHorizontal: 16, backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' }}>
-          {['pending', 'approved', 'rejected', 'settled'].map((tab) => {
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ flexGrow: 0, maxHeight: 52, backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' }}
+          contentContainerStyle={{ paddingHorizontal: 10, flexDirection: 'row' }}
+        >
+          {['all', 'pending', 'approved', 'rejected', 'settled'].map((tab) => {
             const isActive = activeTab === tab;
-            const count = claims.filter(c => (c.status || 'pending').toLowerCase() === tab).length;
+            const count = tab === 'all'
+              ? claims.length
+              : claims.filter(c => (c.status || 'pending').toLowerCase() === tab).length;
             return (
               <TouchableOpacity
                 key={tab}
                 onPress={() => setActiveTab(tab)}
                 style={{
-                  flex: 1,
                   alignItems: 'center',
                   paddingVertical: 14,
+                  paddingHorizontal: 12,
                   borderBottomWidth: 2,
                   borderBottomColor: isActive ? '#125EC9' : 'transparent',
                 }}
@@ -364,6 +449,81 @@ export default function ExpenseScreen() {
               </TouchableOpacity>
             );
           })}
+        </ScrollView>
+
+        {/* Date Filter & Summary Export Bar */}
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          backgroundColor: '#FFFFFF',
+          paddingHorizontal: 16,
+          paddingVertical: 10,
+          borderBottomWidth: 1,
+          borderBottomColor: '#E5E7EB'
+        }}>
+          {/* Date Range Button */}
+          <TouchableOpacity
+            onPress={() => setShowFilterModal(true)}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: (filterStartDate || filterEndDate) ? '#EFF6FF' : '#F3F4F6',
+              paddingHorizontal: 10,
+              paddingVertical: 7,
+              borderRadius: 8,
+              borderWidth: 1,
+              borderColor: (filterStartDate || filterEndDate) ? '#93C5FD' : '#E5E7EB'
+            }}
+          >
+            <Text style={{ fontSize: 13, marginRight: 5 }}>📅</Text>
+            <Text style={{
+              fontFamily: 'Inter_500Medium',
+              fontSize: 12,
+              color: (filterStartDate || filterEndDate) ? '#1E40AF' : '#4B5563'
+            }}>
+              {filterStartDate && filterEndDate
+                ? `${filterStartDate.getDate()} ${filterStartDate.toLocaleString('default', { month: 'short' })} - ${filterEndDate.getDate()} ${filterEndDate.toLocaleString('default', { month: 'short' })}`
+                : filterStartDate
+                ? `From ${filterStartDate.getDate()} ${filterStartDate.toLocaleString('default', { month: 'short' })}`
+                : filterEndDate
+                ? `Until ${filterEndDate.getDate()} ${filterEndDate.toLocaleString('default', { month: 'short' })}`
+                : 'Date Range'}
+            </Text>
+            {(filterStartDate || filterEndDate) && (
+              <TouchableOpacity
+                onPress={() => {
+                  setFilterStartDate(null);
+                  setFilterEndDate(null);
+                }}
+                style={{ marginLeft: 6 }}
+              >
+                <Text style={{ fontSize: 12, color: '#EF4444', fontWeight: 'bold' }}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </TouchableOpacity>
+
+          {/* Download/Print Summary PDF Button */}
+          <TouchableOpacity
+            onPress={handleDownloadSummaryPdf}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: '#0F3B8C',
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              borderRadius: 8,
+              shadowColor: '#000',
+              shadowOpacity: 0.1,
+              shadowRadius: 2,
+              elevation: 2
+            }}
+          >
+            <Text style={{ fontSize: 12, marginRight: 5 }}>📄</Text>
+            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 12, color: '#FFFFFF' }}>
+              Summary PDF
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Content List */}
@@ -373,12 +533,13 @@ export default function ExpenseScreen() {
           </View>
         ) : (
           <ScrollView
+            style={{ flex: 1 }}
             contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => fetchClaims(true)} colors={['#125EC9']} />}
           >
             {filteredClaims.length === 0 ? (
               <View style={{ alignItems: 'center', justifyContent: 'center', marginTop: 80 }}>
-                <Text style={{ fontSize: 15, fontFamily: 'Inter_500Medium', color: '#9CA3AF' }}>No {activeTab} expenses found</Text>
+                <Text style={{ fontSize: 15, fontFamily: 'Inter_500Medium', color: '#9CA3AF' }}>{activeTab === 'all' ? 'No expenses found' : `No ${activeTab} expenses found`}</Text>
                 <Text style={{ fontSize: 12, fontFamily: 'Inter_400Regular', color: '#D1D5DB', marginTop: 4 }}>Pull down to refresh</Text>
               </View>
             ) : (
@@ -504,11 +665,30 @@ export default function ExpenseScreen() {
                         <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, backgroundColor: statusBgColor(item.status) }}>
                           <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 11, color: statusTextColor(item.status), textTransform: 'capitalize' }}>{item.status}</Text>
                         </View>
-                        {(item.status || 'pending').toLowerCase() === 'pending' ? (
-                          <TouchableOpacity onPress={() => openEditClaim(item)} style={{ marginTop: 8, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: '#125EC9', backgroundColor: '#EFF6FF' }}>
-                            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 11, color: '#125EC9' }}>Edit</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
+                          <TouchableOpacity
+                            onPress={() => handleDownloadPdf(item)}
+                            style={{
+                              paddingHorizontal: 10,
+                              paddingVertical: 6,
+                              borderRadius: 8,
+                              borderWidth: 1,
+                              borderColor: '#0284C7',
+                              backgroundColor: '#F0F9FF',
+                              marginRight: (item.status || 'pending').toLowerCase() === 'pending' ? 6 : 0,
+                              flexDirection: 'row',
+                              alignItems: 'center'
+                            }}
+                          >
+                            <Text style={{ fontSize: 11, marginRight: 3 }}>📄</Text>
+                            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 11, color: '#0284C7' }}>PDF</Text>
                           </TouchableOpacity>
-                        ) : null}
+                          {(item.status || 'pending').toLowerCase() === 'pending' ? (
+                            <TouchableOpacity onPress={() => openEditClaim(item)} style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: '#125EC9', backgroundColor: '#EFF6FF' }}>
+                              <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 11, color: '#125EC9' }}>Edit</Text>
+                            </TouchableOpacity>
+                          ) : null}
+                        </View>
                       </View>
                     </View>
                   </View>
@@ -594,6 +774,82 @@ export default function ExpenseScreen() {
               </>
             )}
           </ScrollView>
+        )}
+
+        {/* Date Filter Modal */}
+        <Modal
+          visible={showFilterModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowFilterModal(false)}
+        >
+          <TouchableOpacity
+            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' }}
+            activeOpacity={1}
+            onPress={() => setShowFilterModal(false)}
+          >
+            <View style={{ width: '85%', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20 }}>
+              <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 16, color: '#1F2937', marginBottom: 14 }}>
+                Filter by Date Range
+              </Text>
+
+              <Text style={{ fontFamily: 'Inter_500Medium', fontSize: 12, color: '#6B7280', marginBottom: 6 }}>Start Date</Text>
+              <TouchableOpacity
+                onPress={() => onPickFilterDate('start')}
+                style={{ backgroundColor: '#F3F4F6', borderRadius: 8, padding: 12, marginBottom: 12 }}
+              >
+                <Text style={{ color: filterStartDate ? '#1F2937' : '#9CA3AF', fontSize: 13 }}>
+                  {filterStartDate ? filterStartDate.toDateString() : 'Select Start Date'}
+                </Text>
+              </TouchableOpacity>
+
+              <Text style={{ fontFamily: 'Inter_500Medium', fontSize: 12, color: '#6B7280', marginBottom: 6 }}>End Date</Text>
+              <TouchableOpacity
+                onPress={() => onPickFilterDate('end')}
+                style={{ backgroundColor: '#F3F4F6', borderRadius: 8, padding: 12, marginBottom: 16 }}
+              >
+                <Text style={{ color: filterEndDate ? '#1F2937' : '#9CA3AF', fontSize: 13 }}>
+                  {filterEndDate ? filterEndDate.toDateString() : 'Select End Date'}
+                </Text>
+              </TouchableOpacity>
+
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setFilterStartDate(null);
+                    setFilterEndDate(null);
+                    setShowFilterModal(false);
+                  }}
+                  style={{ flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#D1D5DB', alignItems: 'center' }}
+                >
+                  <Text style={{ fontFamily: 'Inter_600SemiBold', color: '#6B7280', fontSize: 13 }}>Clear</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => setShowFilterModal(false)}
+                  style={{ flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: '#0F3B8C', alignItems: 'center' }}
+                >
+                  <Text style={{ fontFamily: 'Inter_600SemiBold', color: '#FFFFFF', fontSize: 13 }}>Apply</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
+        {showFilterPicker && (
+          <DateTimePicker
+            value={(showFilterPicker === 'start' ? filterStartDate : filterEndDate) || new Date()}
+            mode="date"
+            display="calendar"
+            onChange={(_e, val) => {
+              const pickerType = showFilterPicker;
+              setShowFilterPicker(Platform.OS === 'ios' ? pickerType : null);
+              if (val) {
+                if (pickerType === 'start') setFilterStartDate(val);
+                else setFilterEndDate(val);
+              }
+            }}
+          />
         )}
 
         {/* Floating Add Button */}

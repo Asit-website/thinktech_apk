@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
 const API_BASE_URL = __DEV__
-  ? 'https://backend.vetansutra.com'  // Local development
+  ? 'http://localhost:4000'  // Local development
   : process.env.API_URL || 'https://backend.vetansutra.com';  // Production from EAS env or fallback
 
 export { API_BASE_URL };
@@ -1316,12 +1316,67 @@ export async function getTeamLateApprovals(status) {
   return resp.data;
 }
 
-export async function reviewTeamLateApproval(id, status, adminRemarks) {
-  const resp = await api.patch('/staff/team/late-approval/' + id + '/review', { status, adminRemarks });
+export async function reviewTeamLateApproval(id, status, adminRemarks, waiveOff = false) {
+  const resp = await api.patch('/staff/team/late-approval/' + id + '/review', { status, adminRemarks, waiveOff });
   return resp.data;
 }
 
 export async function getTeamDashboardStats() {
   const resp = await api.get('/staff/team/dashboard');
+  return resp.data;
+}
+
+export async function submitOutdoorDutyRequest(payload) {
+  const isFormData = typeof FormData !== 'undefined' && payload instanceof FormData;
+  const resp = await api.post('/attendance/outdoor-duty', payload, {
+    headers: isFormData ? { 'Content-Type': 'multipart/form-data' } : { 'Content-Type': 'application/json' }
+  });
+  return resp.data;
+}
+
+export async function getMyOutdoorDutyRequests(month) {
+  const resp = await api.get('/attendance/outdoor-duty/my', { params: { month } });
+  return resp.data;
+}
+
+export async function cancelOutdoorDutyRequest(id) {
+  const resp = await api.delete('/attendance/outdoor-duty/' + id);
+  return resp.data;
+}
+
+export async function getTeamOutdoorRequests(status) {
+  const resp = await api.get('/staff/team/outdoor-requests', { params: { status: status || undefined } });
+  return resp.data;
+}
+
+export async function reviewTeamOutdoorRequest(id, status, rejectionReason) {
+  const resp = await api.patch('/staff/team/outdoor-request/' + id + '/review', { status, rejectionReason });
+  return resp.data;
+}
+
+export async function getTeamExpenses(params) {
+  const resp = await api.get('/staff/team/expenses', { params });
+  return resp.data;
+}
+
+export async function getTeamAdvances(params) {
+  const resp = await api.get('/staff/team/advances', { params });
+  return resp.data;
+}
+
+
+// Salary Advance APIs
+export async function getMyAdvances() {
+  const resp = await api.get('/me/advances');
+  return resp.data;
+}
+
+export async function submitAdvanceRequest(payload) {
+  const resp = await api.post('/me/advances', payload);
+  return resp.data;
+}
+
+export async function cancelAdvanceRequest(id) {
+  const resp = await api.delete('/me/advances/' + id);
   return resp.data;
 }

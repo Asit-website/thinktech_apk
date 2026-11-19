@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   SafeAreaView,
   View,
@@ -14,7 +15,8 @@ import {
   Alert,
   RefreshControl,
   Platform,
-  KeyboardAvoidingView
+  KeyboardAvoidingView,
+  Linking
 } from 'react-native';
 import {
   API_BASE_URL,
@@ -25,7 +27,11 @@ import {
   reviewTeamRegularization,
   getTeamLateApprovals,
   reviewTeamLateApproval,
-  getTeamDashboardStats
+  getTeamDashboardStats,
+  getTeamOutdoorRequests,
+  reviewTeamOutdoorRequest,
+  getTeamExpenses,
+  getTeamAdvances
 } from '../config/api';
 import { notifyError, notifySuccess } from '../utils/notify';
 import BottomNav from '../components/BottomNav';
@@ -109,6 +115,38 @@ function renderStatusBadge(status) {
   );
 }
 
+
+function renderExpenseStatusBadge(status) {
+  const s = String(status || '').toLowerCase();
+  let bg = '#E2E8F0', color = '#475569', label = s ? s.toUpperCase() : 'PENDING';
+  if (s === 'approved') { bg = '#DCFCE7'; color = '#15803D'; label = 'APPROVED'; }
+  else if (s === 'rejected') { bg = '#FEE2E2'; color = '#B91C1C'; label = 'REJECTED'; }
+  else if (s === 'settled') { bg = '#EDE9FE'; color = '#6D28D9'; label = 'SETTLED'; }
+  else if (s === 'pending') { bg = '#FEF3C7'; color = '#B45309'; label = 'PENDING'; }
+
+  return (
+    <View style={[styles.badgePill, { backgroundColor: bg }]}>
+      <Text style={[styles.badgeText, { color }]}>{label}</Text>
+    </View>
+  );
+}
+
+function renderAdvanceStatusBadge(status) {
+  const s = String(status || '').toLowerCase();
+  let bg = '#E2E8F0', color = '#475569', label = s ? s.toUpperCase() : 'PENDING';
+  if (s === 'paid') { bg = '#DCFCE7'; color = '#15803D'; label = 'PAID'; }
+  else if (s === 'approved') { bg = '#DBEAFE'; color = '#1D4ED8'; label = 'APPROVED'; }
+  else if (s === 'deducted') { bg = '#EDE9FE'; color = '#6D28D9'; label = 'DEDUCTED'; }
+  else if (s === 'rejected' || s === 'cancelled') { bg = '#FEE2E2'; color = '#B91C1C'; label = s.toUpperCase(); }
+  else if (s === 'pending') { bg = '#FEF3C7'; color = '#B45309'; label = 'PENDING'; }
+
+  return (
+    <View style={[styles.badgePill, { backgroundColor: bg }]}>
+      <Text style={[styles.badgeText, { color }]}>{label}</Text>
+    </View>
+  );
+}
+
 export default function TeamManagementScreen({ navigation }) {
   // 'members' | 'attendance' | 'regularization' | 'latePunch'
   const [activeTab, setActiveTab] = useState('members');
@@ -137,11 +175,125 @@ export default function TeamManagementScreen({ navigation }) {
   const [lateList, setLateList] = useState([]);
   const [lateLoading, setLateLoading] = useState(false);
   const [lateFilter, setLateFilter] = useState('ALL');
+  const [lateWaiveMap, setLateWaiveMap] = useState({});
 
   const displayedLateList = useMemo(() => {
     if (lateFilter === 'ALL') return lateList;
     return lateList.filter(r => r.status === lateFilter);
   }, [lateList, lateFilter]);
+
+  // Outdoor Duty State
+  const [odList, setOdList] = useState([]);
+  const [odLoading, setOdLoading] = useState(false);
+  const [odFilter, setOdFilter] = useState('ALL');
+
+  const displayedOdList = useMemo(() => {
+    if (odFilter === 'ALL') return odList;
+    return odList.filter(r => r.status === odFilter);
+  }, [odList, odFilter]);
+
+
+  // Team Expenses State (VIEW ONLY)
+  const [teamExpenses, setTeamExpenses] = useState([]);
+  const [teamExpensesLoading, setTeamExpensesLoading] = useState(false);
+  const [teamExpensesStats, setTeamExpensesStats] = useState({
+    total: 0, pending: 0, approved: 0, rejected: 0, settled: 0, totalAmount: 0
+  });
+  const [teamExpStatusFilter, setTeamExpStatusFilter] = useState('all');
+  const [teamExpTypeFilter, setTeamExpTypeFilter] = useState('all');
+  const [pickerState, setPickerState] = useState(null);
+  const [teamExpStaffFilter, setTeamExpStaffFilter] = useState('all');
+  const [selectedExpenseDetail, setSelectedExpenseDetail] = useState(null);
+
+  // Team Advances State (VIEW ONLY)
+  const [teamAdvances, setTeamAdvances] = useState([]);
+  const [teamAdvancesLoading, setTeamAdvancesLoading] = useState(false);
+  const [teamAdvancesStats, setTeamAdvancesStats] = useState({
+    totalCount: 0, totalAmount: 0, pendingAmount: 0, deductedAmount: 0
+  });
+  const [teamAdvStatusFilter, setTeamAdvStatusFilter] = useState('all');
+  const [teamAdvCategoryFilter, setTeamAdvCategoryFilter] = useState('all');
+  const [teamAdvStaffFilter, setTeamAdvStaffFilter] = useState('all');
+  const [selectedAdvanceDetail, setSelectedAdvanceDetail] = useState(null);
+
+  // Load Team Expenses
+  const loadTeamExpenses = useCallback(async () => {
+    setTeamExpensesLoading(true);
+    try {
+      const params = {};
+      if (teamExpStatusFilter && teamExpStatusFilter !== 'all') params.status = teamExpStatusFilter;
+      if (teamExpStaffFilter && teamExpStaffFilter !== 'all') params.staffId = teamExpStaffFilter;
+      const resp = await getTeamExpenses(params);
+      if (resp?.success) {
+        setTeamExpenses(resp.data || []);
+        if (resp.stats) setTeamExpensesStats(resp.stats);
+      }
+    } catch (err) {
+      console.error('Failed to load team expenses:', err);
+    } finally {
+      setTeamExpensesLoading(false);
+    }
+    if (teamExpTypeFilter && teamExpTypeFilter !== 'all') params.expenseType = teamExpTypeFilter;
+  }, [teamExpStatusFilter, teamExpStaffFilter, teamExpTypeFilter]);
+
+  // Load Team Advances
+  const loadTeamAdvances = useCallback(async () => {
+    setTeamAdvancesLoading(true);
+    try {
+      const params = {};
+      if (teamAdvStatusFilter && teamAdvStatusFilter !== 'all') params.status = teamAdvStatusFilter;
+      if (teamAdvCategoryFilter && teamAdvCategoryFilter !== 'all') params.advanceCategory = teamAdvCategoryFilter;
+      if (teamAdvStaffFilter && teamAdvStaffFilter !== 'all') params.staffId = teamAdvStaffFilter;
+      const resp = await getTeamAdvances(params);
+      if (resp?.success) {
+        setTeamAdvances(resp.data || []);
+        if (resp.stats) setTeamAdvancesStats(resp.stats);
+      }
+    } catch (err) {
+      console.error('Failed to load team advances:', err);
+    } finally {
+      setTeamAdvancesLoading(false);
+    }
+  }, [teamAdvStatusFilter, teamAdvCategoryFilter, teamAdvStaffFilter]);
+
+  // Download Claim PDF
+  const handleDownloadClaimPdf = async (claimId) => {
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const baseURL = API_BASE_URL || (__DEV__ ? 'http://localhost:4000' : 'https://backend.vetansutra.com');
+      const url = `${baseURL}/staff/team/expenses/${claimId}/pdf?token=${encodeURIComponent(token || '')}`;
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.open(url, '_blank');
+      } else {
+        await Linking.openURL(url);
+      }
+    } catch (err) {
+      console.error('Failed to open claim PDF:', err);
+      notifyError('Failed to open claim PDF');
+    }
+  };
+
+  // Download Summary PDF
+  const handleDownloadSummaryPdf = async () => {
+    try {
+      const token = await AsyncStorage.getItem('auth_token');
+      const baseURL = API_BASE_URL || (__DEV__ ? 'http://localhost:4000' : 'https://backend.vetansutra.com');
+      const queryParts = [];
+      if (token) queryParts.push(`token=${encodeURIComponent(token)}`);
+      if (teamExpStatusFilter && teamExpStatusFilter !== 'all') queryParts.push(`status=${encodeURIComponent(teamExpStatusFilter)}`);
+      if (teamExpStaffFilter && teamExpStaffFilter !== 'all') queryParts.push(`userId=${encodeURIComponent(teamExpStaffFilter)}`);
+      const qs = queryParts.length ? `?${queryParts.join('&')}` : '';
+      const url = `${baseURL}/staff/team/expenses/report/pdf${qs}`;
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.open(url, '_blank');
+      } else {
+        await Linking.openURL(url);
+      }
+    } catch (err) {
+      console.error('Failed to open summary PDF:', err);
+      notifyError('Failed to open summary PDF');
+    }
+  };
 
   // Reject Remarks Modal
   const [rejectModalVisible, setRejectModalVisible] = useState(false);
@@ -236,18 +388,55 @@ export default function TeamManagementScreen({ navigation }) {
     }
   }, []);
 
+  // Load Outdoor Approvals
+  const loadOutdoorApprovals = useCallback(async () => {
+    setOdLoading(true);
+    try {
+      const resp = await getTeamOutdoorRequests();
+      if (resp?.success) {
+        setOdList(resp.list || []);
+      }
+    } catch (e) {
+      console.error('Failed to load team outdoor requests:', e);
+    } finally {
+      setOdLoading(false);
+    }
+  }, []);
+
+  const handleReviewOutdoor = async (id, status, rejectionReason = null) => {
+    setActioningId(id);
+    try {
+      const resp = await reviewTeamOutdoorRequest(id, { status, rejectionReason });
+      if (resp?.success) {
+        notifySuccess(`Outdoor duty request ${status.toLowerCase()} successfully`);
+        loadOutdoorApprovals();
+      } else {
+        notifyError(resp?.message || 'Action failed');
+      }
+    } catch (err) {
+      notifyError(err.response?.data?.message || 'Failed to update request');
+    } finally {
+      setActioningId(null);
+      setRejectModalVisible(false);
+    }
+  };
+
   useEffect(() => {
     loadDashboardStats();
     loadMembers();
     loadRegularizations();
     loadLateApprovals();
-  }, [loadDashboardStats, loadMembers, loadRegularizations, loadLateApprovals]);
+    loadOutdoorApprovals();
+  }, [loadDashboardStats, loadMembers, loadRegularizations, loadLateApprovals, loadOutdoorApprovals]);
 
   useEffect(() => {
     if (activeTab === 'attendance') loadAttendance();
     else if (activeTab === 'regularization') loadRegularizations();
     else if (activeTab === 'latePunch') loadLateApprovals();
-  }, [activeTab, loadAttendance, loadRegularizations, loadLateApprovals]);
+      if (activeTab === 'outdoorDuty') loadOutdoorApprovals();
+    else if (activeTab === 'expenses') loadTeamExpenses();
+    else if (activeTab === 'advances') loadTeamAdvances();
+  }, [activeTab, loadAttendance, loadRegularizations, loadLateApprovals, loadOutdoorApprovals, loadTeamExpenses, loadTeamAdvances, teamExpStatusFilter, teamExpStaffFilter, teamExpTypeFilter, teamAdvStatusFilter, teamAdvCategoryFilter, teamAdvStaffFilter]);
 
   // Open Full Profile Modal
   const handleOpenProfile = async (staffId) => {
@@ -287,12 +476,12 @@ export default function TeamManagementScreen({ navigation }) {
   };
 
   // Late Punch Review
-  const handleReviewLate = async (id, status, remarks = '') => {
+  const handleReviewLate = async (id, status, remarks = '', waiveOff = false) => {
     setActioningId(id);
     try {
-      const resp = await reviewTeamLateApproval(id, status, remarks);
+      const resp = await reviewTeamLateApproval(id, status, remarks, waiveOff);
       if (resp?.success) {
-        notifySuccess(`Late check-in ${status.toLowerCase()} successfully`);
+        notifySuccess(`Late check-in ${status.toLowerCase()} successfully${waiveOff ? ' (Late Waived)' : ''}`);
         loadLateApprovals();
       } else {
         notifyError(resp?.message || 'Failed to update request');
@@ -304,6 +493,7 @@ export default function TeamManagementScreen({ navigation }) {
       setRejectModalVisible(false);
     }
   };
+
 
   // Open Reject Dialog
   const openRejectDialog = (type, id) => {
@@ -317,6 +507,8 @@ export default function TeamManagementScreen({ navigation }) {
     setRejectSubmitting(true);
     if (rejectType === 'reg') {
       await handleReviewReg(rejectTargetId, 'REJECTED', rejectRemarks);
+    } else if (rejectType === 'od') {
+      await handleReviewOutdoor(rejectTargetId, 'REJECTED', rejectRemarks);
     } else {
       await handleReviewLate(rejectTargetId, 'REJECTED', rejectRemarks);
     }
@@ -333,6 +525,7 @@ export default function TeamManagementScreen({ navigation }) {
   // Pending Counts
   const pendingRegCount = useMemo(() => regList.filter(r => r.status === 'PENDING').length, [regList]);
   const pendingLateCount = useMemo(() => lateList.filter(r => r.status === 'PENDING').length, [lateList]);
+  const pendingOdCount = useMemo(() => odList.filter(r => r.status === 'PENDING').length, [odList]);
 
   // Attendance Stats
   const attStats = useMemo(() => {
@@ -434,7 +627,7 @@ export default function TeamManagementScreen({ navigation }) {
           onPress={() => setActiveTab('regularization')}
         >
           <Text style={[styles.tabText, activeTab === 'regularization' && styles.tabTextActive]}>
-            Regularize {pendingRegCount > 0 ? `(${pendingRegCount})` : ''}
+            Post Approval {pendingRegCount > 0 ? `(${pendingRegCount})` : ''}
           </Text>
         </TouchableOpacity>
 
@@ -444,6 +637,33 @@ export default function TeamManagementScreen({ navigation }) {
         >
           <Text style={[styles.tabText, activeTab === 'latePunch' && styles.tabTextActive]}>
             Late Punch {pendingLateCount > 0 ? `(${pendingLateCount})` : ''}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'outdoorDuty' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('outdoorDuty')}
+        >
+          <Text style={[styles.tabText, activeTab === 'outdoorDuty' && styles.tabTextActive]}>
+            Pre Approval {pendingOdCount > 0 ? `(${pendingOdCount})` : ''}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'expenses' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('expenses')}
+        >
+          <Text style={[styles.tabText, activeTab === 'expenses' && styles.tabTextActive]}>
+            Expenses
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'advances' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('advances')}
+        >
+          <Text style={[styles.tabText, activeTab === 'advances' && styles.tabTextActive]}>
+            Advances
           </Text>
         </TouchableOpacity>
       </ScrollView>
@@ -839,10 +1059,174 @@ export default function TeamManagementScreen({ navigation }) {
 
                   {/* Column 6: Action */}
                   {item.status === 'PENDING' ? (
-                    <View style={styles.actionBtnRow}>
+                    <View style={{ marginTop: 6 }}>
                       <TouchableOpacity
-                        style={styles.approveBtn}
-                        onPress={() => handleReviewLate(item.id, 'APPROVED')}
+                        style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}
+                        onPress={() => setLateWaiveMap(prev => ({ ...prev, [item.id]: !prev[item.id] }))}
+                        activeOpacity={0.8}
+                      >
+                        <View style={{
+                          width: 18,
+                          height: 18,
+                          borderRadius: 4,
+                          borderWidth: 1.5,
+                          borderColor: lateWaiveMap[item.id] ? '#0284C7' : '#94A3B8',
+                          backgroundColor: lateWaiveMap[item.id] ? '#0284C7' : '#FFFFFF',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          marginRight: 6
+                        }}>
+                          {lateWaiveMap[item.id] ? <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>✓</Text> : null}
+                        </View>
+                        <Text style={{ fontSize: 12, color: lateWaiveMap[item.id] ? '#0284C7' : '#475569', fontWeight: '600' }}>
+                          Waive Off Late Mark
+                        </Text>
+                      </TouchableOpacity>
+
+                      <View style={styles.actionBtnRow}>
+                        <TouchableOpacity
+                          style={[styles.approveBtn, lateWaiveMap[item.id] ? { backgroundColor: '#0284C7' } : null]}
+                          onPress={() => handleReviewLate(item.id, 'APPROVED', '', !!lateWaiveMap[item.id])}
+                          disabled={actioningId === item.id}
+                        >
+                          <Text style={styles.approveBtnText}>{lateWaiveMap[item.id] ? 'Approve & Waive' : 'Approve'}</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.rejectBtn}
+                          onPress={() => openRejectDialog('late', item.id)}
+                          disabled={actioningId === item.id}
+                        >
+                          <Text style={styles.rejectBtnText}>Reject</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : (
+                    <View>
+                      {item.isWaived ? (
+                        <View style={{ alignSelf: 'flex-start', backgroundColor: '#E0F2FE', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginBottom: 4 }}>
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: '#0369A1' }}>LATE WAIVED OFF</Text>
+                        </View>
+                      ) : null}
+                      <Text style={styles.reviewedText}>
+                        {item.adminRemarks ? `Note: ${item.adminRemarks}` : (item.reviewedAt ? `Reviewed ${item.reviewedAt.slice(0, 10)}` : `Status: ${item.status}`)}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            />
+          )}
+        </View>
+      )}
+
+      {/* TAB 5: OUTDOOR DUTY APPROVALS */}
+      {activeTab === 'outdoorDuty' && (
+        <View style={{ flex: 1 }}>
+          <View style={styles.statsBar}>
+            <TouchableOpacity
+              style={[styles.statPill, odFilter === 'ALL' && { backgroundColor: '#0F3B8C' }]}
+              onPress={() => setOdFilter('ALL')}
+            >
+              <Text style={[styles.statLabel, odFilter === 'ALL' ? { color: '#FFFFFF' } : { color: '#475569' }]}>
+                All ({odList.length})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.statPill, odFilter === 'PENDING' && { backgroundColor: '#FEF3C7' }]}
+              onPress={() => setOdFilter('PENDING')}
+            >
+              <Text style={[styles.statLabel, odFilter === 'PENDING' ? { color: '#B45309' } : { color: '#D97706' }]}>
+                Pending ({odList.filter(r => r.status === 'PENDING').length})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.statPill, odFilter === 'APPROVED' && { backgroundColor: '#DCFCE7' }]}
+              onPress={() => setOdFilter('APPROVED')}
+            >
+              <Text style={[styles.statLabel, odFilter === 'APPROVED' ? { color: '#15803D' } : { color: '#16A34A' }]}>
+                Approved ({odList.filter(r => r.status === 'APPROVED').length})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.statPill, odFilter === 'REJECTED' && { backgroundColor: '#FEE2E2' }]}
+              onPress={() => setOdFilter('REJECTED')}
+            >
+              <Text style={[styles.statLabel, odFilter === 'REJECTED' ? { color: '#B91C1C' } : { color: '#DC2626' }]}>
+                Rejected ({odList.filter(r => r.status === 'REJECTED').length})
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {odLoading && odList.length === 0 ? (
+            <View style={styles.centerBox}>
+              <ActivityIndicator size="large" color="#0F3B8C" />
+              <Text style={{ marginTop: 8, color: '#64748B' }}>Loading outdoor duty requests...</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={displayedOdList}
+              keyExtractor={(item) => String(item.id)}
+              contentContainerStyle={{ padding: 16, paddingBottom: 90 }}
+              refreshControl={<RefreshControl refreshing={odLoading} onRefresh={loadOutdoorApprovals} />}
+              ListEmptyComponent={
+                <View style={styles.emptyBox}>
+                  <Text style={styles.emptyTitle}>No data</Text>
+                  <Text style={styles.emptyText}>No outdoor duty requests found.</Text>
+                </View>
+              }
+              renderItem={({ item }) => (
+                <View style={styles.requestCard}>
+                  {/* Top: Staff details & Status */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.staffName}>{item.user?.profile?.name || `Staff #${item.userId}`}</Text>
+                      <Text style={styles.staffSub}>
+                        ID: {item.user?.profile?.staffId || '--'} • {item.user?.profile?.department || 'General'}
+                      </Text>
+                    </View>
+                    {renderStatusBadge(item.status)}
+                  </View>
+
+                  {/* Date & Location */}
+                  <View style={{ marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F1F5F9' }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={{ fontSize: 11, color: '#64748B' }}>Date:</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#1E293B' }}>{item.date}</Text>
+                    </View>
+                    <View style={{ marginTop: 4 }}>
+                      <Text style={{ fontSize: 11, color: '#64748B' }}>Location:</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: '#0F172A' }}>📍 {item.visitLocation}</Text>
+                      {item.clientName ? (
+                        <Text style={{ fontSize: 11, color: '#2563EB', marginTop: 2 }}>Client: {item.clientName}</Text>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  {/* Reason & Timings */}
+                  <View style={[styles.timingBox, { marginTop: 8 }]}>
+                    <Text style={{ fontSize: 12, color: '#334155' }}>
+                      Reason: <Text style={{ fontWeight: '600' }}>{item.reason}</Text>
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                      Time: {item.fromTime || item.toTime ? `${item.fromTime || '--'} - ${item.toTime || '--'}` : 'Full Day'}
+                    </Text>
+                    {item.remarks ? (
+                      <Text style={{ fontSize: 11, color: '#64748B', marginTop: 4, fontStyle: 'italic' }}>
+                        Note: {item.remarks}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  {/* Actions */}
+                  {item.status === 'PENDING' ? (
+                    <View style={[styles.actionBtnRow, { marginTop: 10 }]}>
+                      <TouchableOpacity
+                        style={[styles.approveBtn, { backgroundColor: '#0D9488' }]}
+                        onPress={() => handleReviewOutdoor(item.id, 'APPROVED')}
                         disabled={actioningId === item.id}
                       >
                         <Text style={styles.approveBtnText}>Approve</Text>
@@ -850,19 +1234,417 @@ export default function TeamManagementScreen({ navigation }) {
 
                       <TouchableOpacity
                         style={styles.rejectBtn}
-                        onPress={() => openRejectDialog('late', item.id)}
+                        onPress={() => openRejectDialog('od', item.id)}
                         disabled={actioningId === item.id}
                       >
                         <Text style={styles.rejectBtnText}>Reject</Text>
                       </TouchableOpacity>
                     </View>
                   ) : (
-                    <Text style={styles.reviewedText}>
-                      {item.adminRemarks ? `Note: ${item.adminRemarks}` : (item.reviewedAt ? `Reviewed ${item.reviewedAt.slice(0, 10)}` : `Status: ${item.status}`)}
+                    <Text style={[styles.reviewedText, { marginTop: 6 }]}>
+                      {item.rejectionReason ? `Note: ${item.rejectionReason}` : (item.reviewedAt ? `Reviewed ${item.reviewedAt.slice(0, 10)}` : `Status: ${item.status}`)}
                     </Text>
                   )}
                 </View>
               )}
+            />
+          )}
+        </View>
+      )}
+
+      {/* TAB 6: TEAM EXPENSES (VIEW ONLY) */}
+      {activeTab === 'expenses' && (
+        <View style={{ flex: 1 }}>
+          {/* Top KPI row */}
+          <View style={styles.statsBar}>
+            <View style={[styles.statPill, { backgroundColor: '#EFF6FF' }]}>
+              <Text style={[styles.statLabel, { color: '#1E40AF' }]}>
+                Claims: {teamExpensesStats.total || 0}
+              </Text>
+            </View>
+            <View style={[styles.statPill, { backgroundColor: '#DCFCE7' }]}>
+              <Text style={[styles.statLabel, { color: '#166534' }]}>
+                Approved: {teamExpensesStats.approved || 0}
+              </Text>
+            </View>
+            <View style={[styles.statPill, { backgroundColor: '#FEF3C7' }]}>
+              <Text style={[styles.statLabel, { color: '#92400E' }]}>
+                Pending: {teamExpensesStats.pending || 0}
+              </Text>
+            </View>
+            <View style={[styles.statPill, { backgroundColor: '#F3E8FF' }]}>
+              <Text style={[styles.statLabel, { color: '#6B21A8' }]}>
+                Settled: {teamExpensesStats.settled || 0}
+              </Text>
+            </View>
+          </View>
+
+          {/* Dropdown Filters (Matching Web) */}
+          <View style={styles.filterBarContainer}>
+            <View style={styles.filterRow}>
+              {/* Member selector */}
+              <TouchableOpacity
+                style={styles.dropdownBtn}
+                onPress={() => setPickerState({
+                  title: 'Select Team Member',
+                  options: [
+                    { label: 'All Team Members', value: 'all' },
+                    ...members.map(m => ({ label: m.name ? `${m.name} (${m.staffId || m.id})` : `Staff #${m.id}`, value: String(m.id) }))
+                  ],
+                  selected: String(teamExpStaffFilter),
+                  onSelect: (val) => setTeamExpStaffFilter(val)
+                })}
+              >
+                <Text style={styles.dropdownBtnText} numberOfLines={1}>
+                  {teamExpStaffFilter === 'all' ? 'All Team Members' : (members.find(m => String(m.id) === String(teamExpStaffFilter))?.name || `Staff #${teamExpStaffFilter}`)}
+                </Text>
+                <Text style={styles.dropdownArrow}>▼</Text>
+              </TouchableOpacity>
+
+              {/* Status selector */}
+              <TouchableOpacity
+                style={styles.dropdownBtn}
+                onPress={() => setPickerState({
+                  title: 'Select Claim Status',
+                  options: [
+                    { label: 'All Status', value: 'all' },
+                    { label: 'Pending', value: 'pending' },
+                    { label: 'Approved', value: 'approved' },
+                    { label: 'Settled with Payroll', value: 'settled' },
+                    { label: 'Rejected', value: 'rejected' }
+                  ],
+                  selected: teamExpStatusFilter,
+                  onSelect: (val) => setTeamExpStatusFilter(val)
+                })}
+              >
+                <Text style={styles.dropdownBtnText} numberOfLines={1}>
+                  {teamExpStatusFilter === 'all' ? 'All Status' : (teamExpStatusFilter === 'settled' ? 'Settled with Payroll' : teamExpStatusFilter.charAt(0).toUpperCase() + teamExpStatusFilter.slice(1))}
+                </Text>
+                <Text style={styles.dropdownArrow}>▼</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.filterRow, { marginTop: 6 }]}>
+              {/* Type selector */}
+              <TouchableOpacity
+                style={styles.dropdownBtn}
+                onPress={() => setPickerState({
+                  title: 'Select Expense Type',
+                  options: [
+                    { label: 'All Types', value: 'all' },
+                    { label: 'Travel', value: 'Travel' },
+                    { label: 'Food', value: 'Food' },
+                    { label: 'Office Supplies', value: 'Office' },
+                    { label: 'Lodging', value: 'Lodging' },
+                    { label: 'Client Meeting', value: 'Client Meeting' },
+                    { label: 'Fuel', value: 'Fuel' },
+                    { label: 'Other', value: 'Other' }
+                  ],
+                  selected: teamExpTypeFilter,
+                  onSelect: (val) => setTeamExpTypeFilter(val)
+                })}
+              >
+                <Text style={styles.dropdownBtnText} numberOfLines={1}>
+                  {teamExpTypeFilter === 'all' ? 'All Types' : teamExpTypeFilter}
+                </Text>
+                <Text style={styles.dropdownArrow}>▼</Text>
+              </TouchableOpacity>
+
+              {/* Refresh button */}
+              <TouchableOpacity
+                style={styles.filterActionBtn}
+                onPress={loadTeamExpenses}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '600', color: '#1E293B' }}>🔄 Refresh</Text>
+              </TouchableOpacity>
+
+              {/* Summary PDF button */}
+              <TouchableOpacity
+                style={[styles.filterActionBtn, { backgroundColor: '#DC2626', borderColor: '#DC2626' }]}
+                onPress={handleDownloadSummaryPdf}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>📄 PDF</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* List */}
+          {teamExpensesLoading ? (
+            <View style={styles.centerBox}>
+              <ActivityIndicator size="large" color="#0F3B8C" />
+              <Text style={{ marginTop: 8, color: '#64748B' }}>Loading team expenses...</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={teamExpenses}
+              keyExtractor={(item) => String(item.id)}
+              contentContainerStyle={{ padding: 16, paddingBottom: 90 }}
+              refreshControl={<RefreshControl refreshing={teamExpensesLoading} onRefresh={loadTeamExpenses} />}
+              ListEmptyComponent={
+                <View style={styles.emptyBox}>
+                  <Text style={styles.emptyTitle}>No Expense Claims</Text>
+                  <Text style={styles.emptyText}>No expense claims found for team members under selected filter.</Text>
+                </View>
+              }
+              renderItem={({ item }) => (
+                <View style={styles.requestCard}>
+                  {/* Top: Member name, ID, status */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#1E293B' }}>{item.staffName || 'Staff Member'}</Text>
+                      <Text style={{ fontSize: 11, color: '#64748B' }}>{item.staffCode || ''} • {item.department || '-'}</Text>
+                    </View>
+                    {renderExpenseStatusBadge(item.status)}
+                  </View>
+
+                  {/* Category and Date */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#F8FAFC' }}>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#0F172A' }}>📁 {item.category || item.title || 'General'}</Text>
+                    <Text style={{ fontSize: 11, color: '#64748B' }}>📅 {formatLongDate(item.expenseDate)}</Text>
+                  </View>
+
+                  {/* Amount Breakdown */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#F8FAFC', padding: 8, borderRadius: 6, marginTop: 8 }}>
+                    <View>
+                      <Text style={{ fontSize: 10, color: '#64748B' }}>Claim Amount</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#0F3B8C' }}>₹{Number(item.amount || 0).toLocaleString('en-IN')}</Text>
+                    </View>
+                    {item.approvedAmount ? (
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={{ fontSize: 10, color: '#16A34A' }}>Approved</Text>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#16A34A' }}>₹{Number(item.approvedAmount).toLocaleString('en-IN')}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  {item.advanceAdjusted ? (
+                    <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginTop: 6 }}>
+                      <Text style={{ fontSize: 11, color: '#B45309', fontWeight: '600' }}>
+                        ⚡ Advance Adjusted: ₹{Number(item.advanceAmount || 0).toLocaleString('en-IN')}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {/* Action Buttons: View Details + PDF (Strictly Read-Only) */}
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F1F5F9' }}>
+                    <TouchableOpacity
+                      onPress={() => setSelectedExpenseDetail(item)}
+                      style={{
+                        flex: 1,
+                        paddingVertical: 7,
+                        borderRadius: 6,
+                        borderWidth: 1,
+                        borderColor: '#0F3B8C',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: '#0F3B8C' }}>👁️ View Details</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => handleDownloadClaimPdf(item.id)}
+                      style={{
+                        flex: 1,
+                        paddingVertical: 7,
+                        borderRadius: 6,
+                        backgroundColor: '#DC2626',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFFFFF' }}>📄 PDF</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            />
+          )}
+        </View>
+      )}
+
+      {/* TAB 7: TEAM ADVANCES (VIEW ONLY) */}
+      {activeTab === 'advances' && (
+        <View style={{ flex: 1 }}>
+          {/* Top KPI row */}
+          <View style={styles.statsBar}>
+            <View style={[styles.statPill, { backgroundColor: '#EFF6FF' }]}>
+              <Text style={[styles.statLabel, { color: '#1E40AF' }]}>
+                Advances: {teamAdvancesStats.totalCount || 0}
+              </Text>
+            </View>
+            <View style={[styles.statPill, { backgroundColor: '#DCFCE7' }]}>
+              <Text style={[styles.statLabel, { color: '#166534' }]}>
+                Total: ₹{(teamAdvancesStats.totalAmount || 0).toLocaleString('en-IN')}
+              </Text>
+            </View>
+            <View style={[styles.statPill, { backgroundColor: '#FEF3C7' }]}>
+              <Text style={[styles.statLabel, { color: '#92400E' }]}>
+                Pending: ₹{(teamAdvancesStats.pendingAmount || 0).toLocaleString('en-IN')}
+              </Text>
+            </View>
+            <View style={[styles.statPill, { backgroundColor: '#F3E8FF' }]}>
+              <Text style={[styles.statLabel, { color: '#6B21A8' }]}>
+                Deducted: ₹{(teamAdvancesStats.deductedAmount || 0).toLocaleString('en-IN')}
+              </Text>
+            </View>
+          </View>
+
+          {/* Dropdown Filters (Matching Web & Admin Advances) */}
+          <View style={styles.filterBarContainer}>
+            <View style={styles.filterRow}>
+              {/* Member selector */}
+              <TouchableOpacity
+                style={styles.dropdownBtn}
+                onPress={() => setPickerState({
+                  title: 'Select Team Member',
+                  options: [
+                    { label: 'All Team Members', value: 'all' },
+                    ...members.map(m => ({ label: m.name ? `${m.name} (${m.staffId || m.id})` : `Staff #${m.id}`, value: String(m.id) }))
+                  ],
+                  selected: String(teamAdvStaffFilter),
+                  onSelect: (val) => setTeamAdvStaffFilter(val)
+                })}
+              >
+                <Text style={styles.dropdownBtnText} numberOfLines={1}>
+                  {teamAdvStaffFilter === 'all' ? 'All Team Members' : (members.find(m => String(m.id) === String(teamAdvStaffFilter))?.name || `Staff #${teamAdvStaffFilter}`)}
+                </Text>
+                <Text style={styles.dropdownArrow}>▼</Text>
+              </TouchableOpacity>
+
+              {/* Advance Type selector */}
+              <TouchableOpacity
+                style={styles.dropdownBtn}
+                onPress={() => setPickerState({
+                  title: 'Select Advance Type',
+                  options: [
+                    { label: 'All Advance Types', value: 'all' },
+                    { label: 'Salary Advance', value: 'salary' },
+                    { label: 'Against Expense', value: 'expense' }
+                  ],
+                  selected: teamAdvCategoryFilter,
+                  onSelect: (val) => setTeamAdvCategoryFilter(val)
+                })}
+              >
+                <Text style={styles.dropdownBtnText} numberOfLines={1}>
+                  {teamAdvCategoryFilter === 'all' ? 'All Advance Types' : (teamAdvCategoryFilter === 'salary' ? 'Salary Advance' : 'Against Expense')}
+                </Text>
+                <Text style={styles.dropdownArrow}>▼</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.filterRow, { marginTop: 6 }]}>
+              {/* Status selector - ONLY ALL, PENDING, DEDUCTED AS IN ADMIN ADVANCES */}
+              <TouchableOpacity
+                style={[styles.dropdownBtn, { flex: 1 }]}
+                onPress={() => setPickerState({
+                  title: 'Select Status',
+                  options: [
+                    { label: 'All Status', value: 'all' },
+                    { label: 'Pending', value: 'pending' },
+                    { label: 'Deducted', value: 'deducted' }
+                  ],
+                  selected: teamAdvStatusFilter,
+                  onSelect: (val) => setTeamAdvStatusFilter(val)
+                })}
+              >
+                <Text style={styles.dropdownBtnText} numberOfLines={1}>
+                  {teamAdvStatusFilter === 'all' ? 'All Status' : (teamAdvStatusFilter === 'pending' ? 'Pending' : 'Deducted')}
+                </Text>
+                <Text style={styles.dropdownArrow}>▼</Text>
+              </TouchableOpacity>
+
+              {/* Refresh button */}
+              <TouchableOpacity
+                style={styles.filterActionBtn}
+                onPress={loadTeamAdvances}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '600', color: '#1E293B' }}>🔄 Refresh</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Advances List */}
+          {teamAdvancesLoading ? (
+            <View style={styles.centerBox}>
+              <ActivityIndicator size="large" color="#0F3B8C" />
+              <Text style={{ marginTop: 8, color: '#64748B' }}>Loading team advances...</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={teamAdvances}
+              keyExtractor={(item) => String(item.id)}
+              contentContainerStyle={{ padding: 16, paddingBottom: 90 }}
+              refreshControl={<RefreshControl refreshing={teamAdvancesLoading} onRefresh={loadTeamAdvances} />}
+              ListEmptyComponent={
+                <View style={styles.emptyBox}>
+                  <Text style={styles.emptyTitle}>No Advances Found</Text>
+                  <Text style={styles.emptyText}>No advance requests found for team members under selected filter.</Text>
+                </View>
+              }
+              renderItem={({ item }) => {
+                const bal = (Number(item.amount) || 0) - (Number(item.paidAmount) || 0);
+                return (
+                  <View style={styles.requestCard}>
+                    {/* Header */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#1E293B' }}>{item.staffName || 'Staff Member'}</Text>
+                        <Text style={{ fontSize: 11, color: '#64748B' }}>{item.staffCode || ''} • {item.department || '-'}</Text>
+                      </View>
+                      {renderAdvanceStatusBadge(item.status)}
+                    </View>
+
+                    {/* Category Tag */}
+                    <View style={{ marginTop: 8 }}>
+                      <View style={{ alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, backgroundColor: item.advanceCategory === 'ADVANCE_AGAINST_EXPENSE' ? '#FEF3C7' : '#EFF6FF' }}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: item.advanceCategory === 'ADVANCE_AGAINST_EXPENSE' ? '#B45309' : '#1D4ED8' }}>
+                          {item.advanceCategory === 'ADVANCE_AGAINST_EXPENSE' ? '🏷️ ADVANCE AGAINST EXPENSE' : '💼 SALARY ADVANCE'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Amount & Balance */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#F8FAFC', padding: 8, borderRadius: 6, marginTop: 8 }}>
+                      <View>
+                        <Text style={{ fontSize: 10, color: '#64748B' }}>Principal</Text>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#1E293B' }}>₹{Number(item.amount || 0).toLocaleString('en-IN')}</Text>
+                      </View>
+                      <View>
+                        <Text style={{ fontSize: 10, color: '#64748B' }}>Paid</Text>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#16A34A' }}>₹{Number(item.paidAmount || 0).toLocaleString('en-IN')}</Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={{ fontSize: 10, color: '#64748B' }}>Balance</Text>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>₹{bal.toLocaleString('en-IN')}</Text>
+                      </View>
+                    </View>
+
+                    {/* Dates */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+                      <Text style={{ fontSize: 11, color: '#64748B' }}>Date: {formatLongDate(item.advanceDate)}</Text>
+                      <Text style={{ fontSize: 11, color: '#64748B' }}>Deduction: {item.deductionMonth || '-'}</Text>
+                    </View>
+
+                    {/* Action (Strictly Read-Only) */}
+                    <View style={{ marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F1F5F9' }}>
+                      <TouchableOpacity
+                        onPress={() => setSelectedAdvanceDetail(item)}
+                        style={{
+                          paddingVertical: 7,
+                          borderRadius: 6,
+                          borderWidth: 1,
+                          borderColor: '#0F3B8C',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#0F3B8C' }}>📋 View Repayment Schedule</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              }}
             />
           )}
         </View>
@@ -1018,6 +1800,350 @@ export default function TeamManagementScreen({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
+
+      {/* MODAL: EXPENSE DETAIL (VIEW ONLY) */}
+      <Modal
+        visible={!!selectedExpenseDetail}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setSelectedExpenseDetail(null)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setSelectedExpenseDetail(null)} style={styles.closeBtn}>
+              <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#1E293B' }}>✕ Close</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalHeaderTitle}>Expense Details</Text>
+            <View style={{ width: 50 }} />
+          </View>
+
+          {selectedExpenseDetail && (
+            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+              <View style={styles.sectionCard}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#1E293B' }}>{selectedExpenseDetail.claimId || `EXP-${selectedExpenseDetail.id}`}</Text>
+                  {renderExpenseStatusBadge(selectedExpenseDetail.status)}
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Staff Member</Text>
+                  <Text style={styles.infoValue}>{selectedExpenseDetail.staffName || '-'}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Department</Text>
+                  <Text style={styles.infoValue}>{selectedExpenseDetail.department || '-'}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Expense Category</Text>
+                  <Text style={styles.infoValue}>{selectedExpenseDetail.category || '-'}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Expense Date</Text>
+                  <Text style={styles.infoValue}>{formatLongDate(selectedExpenseDetail.expenseDate)}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Claim Amount</Text>
+                  <Text style={[styles.infoValue, { color: '#0F3B8C', fontWeight: '800' }]}>₹{Number(selectedExpenseDetail.amount || 0).toLocaleString('en-IN')}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Approved Amount</Text>
+                  <Text style={[styles.infoValue, { color: '#16A34A', fontWeight: '800' }]}>₹{Number(selectedExpenseDetail.approvedAmount || selectedExpenseDetail.amount || 0).toLocaleString('en-IN')}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Payment Method</Text>
+                  <Text style={styles.infoValue}>{selectedExpenseDetail.paymentMethod || 'Company Direct'}</Text>
+                </View>
+                {selectedExpenseDetail.advanceAdjusted ? (
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>Advance Adjusted</Text>
+                    <Text style={[styles.infoValue, { color: '#B45309' }]}>₹{Number(selectedExpenseDetail.advanceAmount || 0).toLocaleString('en-IN')}</Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {/* Description & Remarks */}
+              <View style={styles.sectionCard}>
+                <Text style={styles.sectionTitle}>Description & Remarks</Text>
+                <Text style={{ fontSize: 13, color: '#334155', marginTop: 4 }}>
+                  {selectedExpenseDetail.description || selectedExpenseDetail.remarks || 'No remarks provided.'}
+                </Text>
+                {selectedExpenseDetail.adminRemarks ? (
+                  <View style={{ marginTop: 10, padding: 8, backgroundColor: '#F8FAFC', borderRadius: 6 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#475569' }}>Admin Remarks:</Text>
+                    <Text style={{ fontSize: 12, color: '#1E293B', marginTop: 2 }}>{selectedExpenseDetail.adminRemarks}</Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {/* Receipt */}
+              {selectedExpenseDetail.receiptUrl ? (
+                <View style={styles.sectionCard}>
+                  <Text style={styles.sectionTitle}>Receipt / Invoice</Text>
+                  <Image
+                    source={{ uri: getPhotoUrl(selectedExpenseDetail.receiptUrl) }}
+                    style={{ width: '100%', height: 220, borderRadius: 8, backgroundColor: '#E2E8F0', marginTop: 8 }}
+                    resizeMode="contain"
+                  />
+                </View>
+              ) : null}
+
+              {/* Download PDF button inside detail modal */}
+              <TouchableOpacity
+                onPress={() => handleDownloadClaimPdf(selectedExpenseDetail.id)}
+                style={{
+                  backgroundColor: '#DC2626',
+                  paddingVertical: 12,
+                  borderRadius: 8,
+                  alignItems: 'center',
+                  marginTop: 10
+                }}
+              >
+                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 14 }}>📄 Download Claim PDF</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          )}
+        </SafeAreaView>
+      </Modal>
+
+      {/* MODAL: ADVANCE DETAIL & REPAYMENT SCHEDULE (VIEW ONLY) */}
+      <Modal
+        visible={!!selectedAdvanceDetail}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setSelectedAdvanceDetail(null)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#F8FAFC' }}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setSelectedAdvanceDetail(null)} style={styles.closeBtn}>
+              <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#1E293B' }}>✕ Close</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalHeaderTitle}>Advance Schedule</Text>
+            <View style={{ width: 50 }} />
+          </View>
+
+          {selectedAdvanceDetail && (
+            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+              <View style={styles.sectionCard}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#1E293B' }}>{selectedAdvanceDetail.advanceCode || `ADV-${selectedAdvanceDetail.id}`}</Text>
+                  {renderAdvanceStatusBadge(selectedAdvanceDetail.status)}
+                </View>
+
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Staff Member</Text>
+                  <Text style={styles.infoValue}>{selectedAdvanceDetail.staffName || '-'}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Category</Text>
+                  <Text style={[styles.infoValue, { color: selectedAdvanceDetail.advanceCategory === 'ADVANCE_AGAINST_EXPENSE' ? '#B45309' : '#1D4ED8' }]}>
+                    {selectedAdvanceDetail.advanceCategory === 'ADVANCE_AGAINST_EXPENSE' ? 'Advance Against Expense' : 'Salary Advance'}
+                  </Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Principal Amount</Text>
+                  <Text style={[styles.infoValue, { color: '#0F3B8C', fontWeight: '800' }]}>₹{Number(selectedAdvanceDetail.amount || 0).toLocaleString('en-IN')}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Paid Amount</Text>
+                  <Text style={[styles.infoValue, { color: '#16A34A', fontWeight: '800' }]}>₹{Number(selectedAdvanceDetail.paidAmount || 0).toLocaleString('en-IN')}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Remaining Balance</Text>
+                  <Text style={[styles.infoValue, { color: '#DC2626', fontWeight: '800' }]}>₹{((Number(selectedAdvanceDetail.amount) || 0) - (Number(selectedAdvanceDetail.paidAmount) || 0)).toLocaleString('en-IN')}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Advance Date</Text>
+                  <Text style={styles.infoValue}>{formatLongDate(selectedAdvanceDetail.advanceDate)}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Deduction Month</Text>
+                  <Text style={styles.infoValue}>{selectedAdvanceDetail.deductionMonth || '-'}</Text>
+                </View>
+                {selectedAdvanceDetail.emiCount ? (
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>Installments</Text>
+                    <Text style={styles.infoValue}>{selectedAdvanceDetail.emiCount} Months (₹{Number(selectedAdvanceDetail.monthlyDeduction || 0).toLocaleString('en-IN')}/mo)</Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {/* Reason / Remarks */}
+              <View style={styles.sectionCard}>
+                <Text style={styles.sectionTitle}>Reason / Purpose</Text>
+                <Text style={{ fontSize: 13, color: '#334155', marginTop: 4 }}>
+                  {selectedAdvanceDetail.reason || 'No specific purpose provided.'}
+                </Text>
+              </View>
+
+              {/* Repayment Schedule Breakdown */}
+              <View style={styles.sectionCard}>
+                <Text style={styles.sectionTitle}>Repayment Schedule</Text>
+                {Array.isArray(selectedAdvanceDetail.repaymentSchedule) && selectedAdvanceDetail.repaymentSchedule.length > 0 ? (
+                  selectedAdvanceDetail.repaymentSchedule.map((sched, idx) => (
+                    <View
+                      key={idx}
+                      style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        paddingVertical: 8,
+                        borderBottomWidth: 1,
+                        borderBottomColor: '#F1F5F9'
+                      }}
+                    >
+                      <View>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#1E293B' }}>Inst #{idx + 1} - {sched.month || sched.dueMonth || '-'}</Text>
+                        <Text style={{ fontSize: 10, color: '#64748B' }}>Due Amount: ₹{Number(sched.amount || sched.emiAmount || 0).toLocaleString('en-IN')}</Text>
+                      </View>
+                      <View style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 2,
+                        borderRadius: 4,
+                        backgroundColor: sched.status === 'PAID' || sched.status === 'DEDUCTED' ? '#DCFCE7' : '#FEF3C7'
+                      }}>
+                        <Text style={{
+                          fontSize: 10,
+                          fontWeight: '700',
+                          color: sched.status === 'PAID' || sched.status === 'DEDUCTED' ? '#15803D' : '#B45309'
+                        }}>
+                          {sched.status || 'PENDING'}
+                        </Text>
+                      </View>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={{ fontSize: 12, color: '#64748B', fontStyle: 'italic', marginTop: 6 }}>
+                    Single-shot deduction scheduled for {selectedAdvanceDetail.deductionMonth || 'upcoming payroll'}.
+                  </Text>
+                )}
+              </View>
+            </ScrollView>
+          )}
+        </SafeAreaView>
+      </Modal>
+
+
+      {/* GENERIC DROPDOWN PICKER MODAL */}
+      <Modal
+        visible={pickerState !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPickerState(null)}
+      >
+        <TouchableOpacity
+          style={styles.modalBackdrop}
+          activeOpacity={1}
+          onPress={() => setPickerState(null)}
+        >
+          <View style={[styles.editModalBox, { maxHeight: 420 }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={styles.editModalTitle}>{pickerState?.title || 'Select Option'}</Text>
+              <TouchableOpacity onPress={() => setPickerState(null)} style={{ padding: 4 }}>
+                <Text style={{ fontSize: 16, color: '#64748B', fontWeight: 'bold' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView>
+              {pickerState?.options?.map((opt) => {
+                const isSelected = String(pickerState.selected) === String(opt.value);
+                return (
+                  <TouchableOpacity
+                    key={String(opt.value)}
+                    style={{
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      paddingVertical: 12,
+                      paddingHorizontal: 10,
+                      borderBottomWidth: 1,
+                      borderBottomColor: '#F1F5F9',
+                      backgroundColor: isSelected ? '#EFF6FF' : 'transparent',
+                      borderRadius: 6
+                    }}
+                    onPress={() => {
+                      pickerState.onSelect(opt.value);
+                      setPickerState(null);
+                    }}
+                  >
+                    <Text style={{
+                      fontSize: 14,
+                      fontWeight: isSelected ? '700' : '500',
+                      color: isSelected ? '#0F3B8C' : '#1E293B'
+                    }}>
+                      {opt.label}
+                    </Text>
+                    {isSelected && (
+                      <Text style={{ color: '#0F3B8C', fontWeight: 'bold' }}>✓</Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+
+      {/* GENERIC DROPDOWN PICKER MODAL */}
+      <Modal
+        visible={pickerState !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPickerState(null)}
+      >
+        <TouchableOpacity
+          style={styles.modalBackdrop}
+          activeOpacity={1}
+          onPress={() => setPickerState(null)}
+        >
+          <View style={[styles.editModalBox, { maxHeight: 420 }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={styles.editModalTitle}>{pickerState?.title || 'Select Option'}</Text>
+              <TouchableOpacity onPress={() => setPickerState(null)} style={{ padding: 4 }}>
+                <Text style={{ fontSize: 16, color: '#64748B', fontWeight: 'bold' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView>
+              {pickerState?.options?.map((opt) => {
+                const isSelected = String(pickerState.selected) === String(opt.value);
+                return (
+                  <TouchableOpacity
+                    key={String(opt.value)}
+                    style={{
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      paddingVertical: 12,
+                      paddingHorizontal: 10,
+                      borderBottomWidth: 1,
+                      borderBottomColor: '#F1F5F9',
+                      backgroundColor: isSelected ? '#EFF6FF' : 'transparent',
+                      borderRadius: 6
+                    }}
+                    onPress={() => {
+                      pickerState.onSelect(opt.value);
+                      setPickerState(null);
+                    }}
+                  >
+                    <Text style={{
+                      fontSize: 14,
+                      fontWeight: isSelected ? '700' : '500',
+                      color: isSelected ? '#0F3B8C' : '#1E293B'
+                    }}>
+                      {opt.label}
+                    </Text>
+                    {isSelected && (
+                      <Text style={{ color: '#0F3B8C', fontWeight: 'bold' }}>✓</Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       <BottomNav navigation={navigation} currentTab="home" />
     </SafeAreaView>
   );
@@ -1025,6 +2151,52 @@ export default function TeamManagementScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#F8FAFC' },
+  filterBarContainer: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  dropdownBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  dropdownBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1E293B',
+    flex: 1,
+    marginRight: 4,
+  },
+  dropdownArrow: {
+    fontSize: 10,
+    color: '#64748B',
+  },
+  filterActionBtn: {
+    backgroundColor: '#F1F5F9',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   header: {
     flexDirection: 'row',
     alignItems: 'center',
